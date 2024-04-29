@@ -66,8 +66,12 @@ uint32_t move_tail(nvm_queue_t* q, uint32_t cur_tail) {
     bool pass = true;
     while (pass ) {
         //uint32_t count_copy = count;
+        // 判断tail是否追上了head ,按位与是环形队列中常用的判断方法。如果pass为假，说明tail追上了head，不需要继续移动tail
         pass = (((cur_tail+count+1) & q->qs_minus_1) != (q->head.load(simt::memory_order_relaxed) & q->qs_minus_1 ));
+        // pass为真，说明没有tail追上head，需要继续移动tail
         if (pass) {
+            // tail_mark的作用是记录队列中每个元素的状态，LOCKED表示该元素正在被使用，UNLOCKED表示该元素空闲
+            // 如果在exchange之前，该位置是LOCKED，说明该位置的元素正在被使用，需要等待，否则可以使用该位置
             pass = ((q->tail_mark[(cur_tail+count)&q->qs_minus_1].val.exchange(UNLOCKED, simt::memory_order_relaxed)) == LOCKED);
             if (pass)
                 count++;
@@ -99,6 +103,7 @@ uint32_t move_head_cq(nvm_queue_t* q, uint32_t cur_head, nvm_queue_t* sq) {
         /* } */
 
     }
+    // 因为在最后一次循环中，count被多加了1
     count -= 1;
     if (count) {
         uint32_t loc_ = (cur_head + (count -1)) & q->qs_minus_1;
@@ -181,6 +186,7 @@ uint16_t sq_enqueue(nvm_queue_t* sq, nvm_cmd_t* cmd, simt::atomic<uint64_t, simt
     /* ticket += __popc(mask & ((1 << lane) - 1)); */
 
     uint32_t pos = ticket & (sq->qs_minus_1);
+    // (x/2^y) *2,i.e,(ticket/2^qs_log2) * 2
     uint64_t id = get_id(ticket, sq->qs_log2);
 
     //uint64_t k = 0;
@@ -248,9 +254,10 @@ uint16_t sq_enqueue(nvm_queue_t* sq, nvm_cmd_t* cmd, simt::atomic<uint64_t, simt
     //queue_loc->dword[10] = cmd->dword[10];
     //queue_loc->dword[11] = cmd->dword[11];
     //queue_loc->dword[12] = cmd->dword[12];
-
+// 循环展开优化
 #pragma unroll
     for (uint32_t i = 0; i < 64/sizeof(copy_type); i++) {
+        // 这个循环将命令复制到队列中的位置。
         queue_loc[i] = cmd_[i];
     }
 
@@ -272,9 +279,11 @@ uint16_t sq_enqueue(nvm_queue_t* sq, nvm_cmd_t* cmd, simt::atomic<uint64_t, simt
     } while(!proceed);
     */
     //sq->tickets[pos].val.store(id + 1, simt::memory_order_release);
+    // 
     if (pc_tail) {
         *cur_pc_tail = pc_tail->load(simt::memory_order_relaxed);
     }
+    // 在命令复制完成后，设置尾部标记为 LOCKED，表示这一位置已经被填充并且准备好被处理。
     sq->tail_mark[pos].val.store(LOCKED, simt::memory_order_release);
     /*     while (((pos+1) & sq->qs_minus_1) == (sq->head.load(simt::memory_order_acquire) & (sq->qs_minus_1))) { */
 /* #if defined(__CUDACC__) && (__CUDA_ARCH__ >= 700 || !defined(__CUDA_ARCH__)) */
@@ -284,11 +293,17 @@ uint16_t sq_enqueue(nvm_queue_t* sq, nvm_cmd_t* cmd, simt::atomic<uint64_t, simt
     bool cont = true;
     ns = 8;
     cont = sq->tail_mark[pos].val.load(simt::memory_order_relaxed) == LOCKED;
+    // 移动尾部，逻辑类似于move_tail的pass变量
     while(cont) {
         bool new_cont = sq->tail_lock.load(simt::memory_order_relaxed) == LOCKED;
+        // 如果tail_lock是LOCKED，说明有其他线程正在移动tail，需要等待，即new_cont为真
         if (!new_cont) {
+            // 如果tail_lock是UNLOCKED，说明没有其他线程在移动tail，可以移动tail
+            // 将tail_lock设置为LOCKED，表示当前线程正在移动tail
             new_cont = sq->tail_lock.fetch_or(LOCKED, simt::memory_order_acquire) == LOCKED;
+            // 如果new_cont为假，说明当前线程成功获取了tail_lock，可以移动tail
             if(!new_cont) {
+                //
                 uint32_t cur_tail = sq->tail.load(simt::memory_order_relaxed);
 
                 uint32_t tail_move_count = move_tail(sq, cur_tail);
