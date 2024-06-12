@@ -24,8 +24,8 @@
 #define BLK 1
 
 
-#define ORIG 0
-#define COAL 1
+#define ORIG 0 // original
+#define COAL 1 // coalesce
 
 struct Settings
 {

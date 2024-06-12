@@ -125,6 +125,7 @@ static void getDeviceMemory2(int device, void*& bufferPtr, size_t size, void*& o
     devicePtr = (void*) (((uint64_t)attrs.devicePointer));
 */
     origPtr = bufferPtr;
+    // 与 0xffffffffffffe0 进行位与操作的目的是将 bufferPtr 的地址向下舍入到最接近的 32 字节边界
     bufferPtr = (void*) ((((uint64_t)bufferPtr) + (128))  & 0xffffffffffffe0);
     //std::cout << "getdeviceMemory: " << std::hex << bufferPtr <<  std::endl;
 }
@@ -151,14 +152,6 @@ inline DmaPtr createDma(const nvm_ctrl_t* ctrl, size_t size)
     nvm_dma_t* dma = nullptr;
     void* buffer = nullptr;
 
-    /*
-    cudaError_t err = cudaHostAlloc(&buffer, size, cudaHostAllocDefault);
-    if (err != cudaSuccess)
-    {
-        throw error(string("Failed to allocate host memory: ") + cudaGetErrorString(err));
-    }
-    */
-
     int err  = posix_memalign(&buffer, 4096, size);
 
     if (err) {
@@ -167,14 +160,12 @@ inline DmaPtr createDma(const nvm_ctrl_t* ctrl, size_t size)
     int status = nvm_dma_map_host(&dma, ctrl, buffer, size);
     if (!nvm_ok(status))
     {
-        //cudaFreeHost(buffer);
         free(buffer);
         throw error(string("Failed to map host memory: ") + nvm_strerror(status));
     }
 
     return DmaPtr(dma, [buffer](nvm_dma_t* dma) {
         nvm_dma_unmap(dma);
-        //cudaFreeHost(buffer);
         free(buffer);
     });
 }
@@ -210,6 +201,7 @@ inline DmaPtr createDma(const nvm_ctrl_t* ctrl, size_t size, int cudaDevice)
         cudaFree(bufferPtr);
         throw error(string("Failed to clear device memory: ") + cudaGetErrorString(err));
     }
+    // 
     dma->vaddr = bufferPtr;
 
     return DmaPtr(dma, [bufferPtr, origPtr](nvm_dma_t* dma) {
@@ -220,7 +212,7 @@ inline DmaPtr createDma(const nvm_ctrl_t* ctrl, size_t size, int cudaDevice)
 }
 
 
-
+// 在host上创建缓冲区（锁页内存）
 inline BufferPtr createBuffer(size_t size)
 {
     void* buffer = nullptr;
@@ -238,7 +230,7 @@ inline BufferPtr createBuffer(size_t size)
 }
 
 
-
+// 在指定的cuda设备上创建缓冲区
 inline BufferPtr createBuffer(size_t size, int cudaDevice)
 {
     if (cudaDevice < 0)

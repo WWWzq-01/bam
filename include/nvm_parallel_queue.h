@@ -55,14 +55,18 @@ inline __device__
 void put_cid(nvm_queue_t* sq, uint16_t id) {
     sq->cid[id].val.store(UNLOCKED, simt::memory_order_release);
 }
-
+/*
+    该函数的作用是计算tail追上head需要移动的距离，同时将tail和head之间的tail的移动是为了保证tail和head之间的元素都是有效的元素。
+*/
 inline __device__
 uint32_t move_tail(nvm_queue_t* q, uint32_t cur_tail) {
     uint32_t count = 0;
 
 
 
-
+    // 循环有两种结束的方式
+    // 1. tail追上head，即tail和head之间没有有效的元素，即队列满了，此时pass为假，循环结束
+    // 2. 在tail和head之前找到了处于UNLOCKED状态的元素，此时pass为假，循环结束
     bool pass = true;
     while (pass ) {
         //uint32_t count_copy = count;
@@ -73,6 +77,7 @@ uint32_t move_tail(nvm_queue_t* q, uint32_t cur_tail) {
             // tail_mark的作用是记录队列中每个元素的状态，LOCKED表示该元素正在被使用，UNLOCKED表示该元素空闲
             // 如果在exchange之前，该位置是LOCKED，说明该位置的元素正在被使用，需要等待，否则可以使用该位置
             pass = ((q->tail_mark[(cur_tail+count)&q->qs_minus_1].val.exchange(UNLOCKED, simt::memory_order_relaxed)) == LOCKED);
+            // 如果pass为真，说明该位置的元素正在被使用，需要等待，否则可以使用该位置。需要等待，则递增count，继续循环
             if (pass)
                 count++;
         }
@@ -177,6 +182,7 @@ uint16_t sq_enqueue(nvm_queue_t* sq, nvm_cmd_t* cmd, simt::atomic<uint64_t, simt
     //uint32_t leader = __ffs(mask) - 1;
     //uint32_t lane = lane_id();
     uint32_t ticket;
+    // 递增ticket
     ticket = sq->in_ticket.fetch_add(1, simt::memory_order_relaxed);
     /* if (lane == leader) { */
     /*     ticket = sq->in_ticket.fetch_add(active_count, simt::memory_order_acquire); */
@@ -187,10 +193,12 @@ uint16_t sq_enqueue(nvm_queue_t* sq, nvm_cmd_t* cmd, simt::atomic<uint64_t, simt
 
     uint32_t pos = ticket & (sq->qs_minus_1);
     // (x/2^y) *2,i.e,(ticket/2^qs_log2) * 2
+    // 这个id也就是turn值
     uint64_t id = get_id(ticket, sq->qs_log2);
 
     //uint64_t k = 0;
     unsigned int ns = 8;
+    // 进行轮询，使用relaxed-load
     while ((sq->tickets[pos].val.load(simt::memory_order_relaxed) != id) ) {
         /*if (k++ % 100 == 0)   {
             printf("tid: %llu\tpos: %llu\tticket: %llu\tid: %llu\ttickets_pos: %llu\tqueue_head: %llu\tqueue_tail: %llu\n",
@@ -199,6 +207,7 @@ uint16_t sq_enqueue(nvm_queue_t* sq, nvm_cmd_t* cmd, simt::atomic<uint64_t, simt
                    (unsigned long long)(sq->head.load(simt::memory_order_acquire) & (sq->qs_minus_1)), (unsigned long long)(sq->tail.load(simt::memory_order_acquire) & (sq->qs_minus_1)));
                    }*/
 #if defined(__CUDACC__) && (__CUDA_ARCH__ >= 700 || !defined(__CUDA_ARCH__))
+        // __nanosleep()在计算能力7.0及以上中可用
         __nanosleep(ns);
         if (ns < 256) {
             ns *= 2;
@@ -207,6 +216,7 @@ uint16_t sq_enqueue(nvm_queue_t* sq, nvm_cmd_t* cmd, simt::atomic<uint64_t, simt
     }
 
     ns = 8;
+    // 进行轮询，使用acquire-load
     while ((sq->tickets[pos].val.load(simt::memory_order_acquire) != id) ) {
         /*if (k++ % 100 == 0)   {
             printf("tid: %llu\tpos: %llu\tticket: %llu\tid: %llu\ttickets_pos: %llu\tqueue_head: %llu\tqueue_tail: %llu\n",
@@ -283,7 +293,8 @@ uint16_t sq_enqueue(nvm_queue_t* sq, nvm_cmd_t* cmd, simt::atomic<uint64_t, simt
     if (pc_tail) {
         *cur_pc_tail = pc_tail->load(simt::memory_order_relaxed);
     }
-    // 在命令复制完成后，设置尾部标记为 LOCKED，表示这一位置已经被填充并且准备好被处理。
+    // 在命令复制完成后，设置尾部标记为 LOCKED(1)，表示这一位置已经被填充并且准备好被处理。
+    // 使用release-store
     sq->tail_mark[pos].val.store(LOCKED, simt::memory_order_release);
     /*     while (((pos+1) & sq->qs_minus_1) == (sq->head.load(simt::memory_order_acquire) & (sq->qs_minus_1))) { */
 /* #if defined(__CUDACC__) && (__CUDA_ARCH__ >= 700 || !defined(__CUDA_ARCH__)) */
@@ -292,18 +303,18 @@ uint16_t sq_enqueue(nvm_queue_t* sq, nvm_cmd_t* cmd, simt::atomic<uint64_t, simt
 /*     } */
     bool cont = true;
     ns = 8;
+    // cont用于判断当前pos的tail_mark是否为LOCKED，如果为LOCKED，说明该位置的元素正在被使用，
     cont = sq->tail_mark[pos].val.load(simt::memory_order_relaxed) == LOCKED;
     // 移动尾部，逻辑类似于move_tail的pass变量
     while(cont) {
         bool new_cont = sq->tail_lock.load(simt::memory_order_relaxed) == LOCKED;
-        // 如果tail_lock是LOCKED，说明有其他线程正在移动tail，需要等待，即new_cont为真
+        // 如果tail_lock是LOCKED，说明有其他线程获取了该位置的锁，需要递增tail
         if (!new_cont) {
             // 如果tail_lock是UNLOCKED，说明没有其他线程在移动tail，可以移动tail
             // 将tail_lock设置为LOCKED，表示当前线程正在移动tail
             new_cont = sq->tail_lock.fetch_or(LOCKED, simt::memory_order_acquire) == LOCKED;
             // 如果new_cont为假，说明当前线程成功获取了tail_lock，可以移动tail
             if(!new_cont) {
-                //
                 uint32_t cur_tail = sq->tail.load(simt::memory_order_relaxed);
 
                 uint32_t tail_move_count = move_tail(sq, cur_tail);
@@ -314,6 +325,7 @@ uint16_t sq_enqueue(nvm_queue_t* sq, nvm_cmd_t* cmd, simt::atomic<uint64_t, simt
                     if (pc_tail) {
                         *cur_pc_tail = pc_tail->load(simt::memory_order_acquire);
                     }
+            // 使用内联汇编将new_db的值写入sq->db所指向的内存地址
 		    asm volatile ("st.mmio.relaxed.sys.global.u32 [%0], %1;" :: "l"(sq->db),"r"(new_db) : "memory");
                     //*(sq->db) = new_db;
 
@@ -325,6 +337,7 @@ uint16_t sq_enqueue(nvm_queue_t* sq, nvm_cmd_t* cmd, simt::atomic<uint64_t, simt
                 sq->tail_lock.store(UNLOCKED, simt::memory_order_release);
             }
         }
+        // 再次尝试
         cont = sq->tail_mark[pos].val.load(simt::memory_order_relaxed) == LOCKED;
         if (cont) {
 #if defined(__CUDACC__) && (__CUDA_ARCH__ >= 700 || !defined(__CUDA_ARCH__))

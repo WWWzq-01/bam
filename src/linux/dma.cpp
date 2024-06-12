@@ -114,7 +114,14 @@ int nvm_dma_create(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, size_t size)
 }
 
 
-
+/*
+    非易失性内存 (NVM) 控制器和宿主内存之间创建一个 DMA (Direct Memory Access) 映射。
+    这个映射允许控制器直接访问宿主内存中的数据.
+    nvm_dma_t** handle：指向 DMA 映射句柄的指针的指针，用于返回创建的 DMA 映射的引用。
+    const nvm_ctrl_t* ctrl：指向控制器结构的指针，包含了与 NVM 控制器相关的配置信息。
+    void* vaddr：宿主内存中需要映射的起始虚拟地址。
+    size_t size：需要映射的内存大小。
+*/
 int nvm_dma_map_host(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, void* vaddr, size_t size)
 {
     struct ioctl_mapping* md;
@@ -150,6 +157,10 @@ int nvm_dma_map_host(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, void* vaddr, si
 
 
 #ifdef _CUDA
+/*
+    为设备内存（特别是 CUDA 设备上的内存）创建一个 DMA (Direct Memory Access) 映射，
+    使得 NVM 控制器能够直接访问设备内存中的数据.
+*/
 int nvm_dma_map_device(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, void* devptr, size_t size)
 {
     struct ioctl_mapping* md;
