@@ -1532,9 +1532,10 @@ uint64_t range_d_t<T>::acquire_page(const size_t pg, const uint32_t count, const
     bool fail = true;
     unsigned int ns = 8;
 
-
+    // predetch_count是用作CPU_cache的
     uint8_t prefetch_count = pages[index].prefetch_count.load(simt::memory_order_acquire);  
     uint32_t p_count = 0;
+    // 最高位是状态为：表示该页的prefetch_count是否被设置
     if(prefetch_count != 0 && (prefetch_count >>7 == 0) ){
         p_count = 1;
         pages[index].prefetch_count.store(prefetch_count | 0x80, simt::memory_order_release);
@@ -1552,12 +1553,16 @@ uint64_t range_d_t<T>::acquire_page(const size_t pg, const uint32_t count, const
 
 
     do {
+        // 忽略了脏位，保留valid位和busy位
         st = (read_state >> (CNT_SHIFT+1)) & 0x03;
 
         switch (st) {
             //invalid
         case NV_NB:
+            // #define BUSY    0x40000000U =0100 0000 0000 0000 0000 0000 0000 0000 
+            // 表达式右边代表将该cachline置为busy，同时返回操作前的旧值
             st_new = pages[index].state.fetch_or(BUSY, simt::memory_order_acquire);
+            // 代表该cache line没有被其他线程占用，不处于BUSY状态
             if ((st_new & BUSY) == 0) {
                 
                 uint32_t page_trans = cache.find_slot(index, range_id, queue, read_io_cnt, evicted_p_array);
@@ -1574,16 +1579,16 @@ uint64_t range_d_t<T>::acquire_page(const size_t pg, const uint32_t count, const
                 //ctrl = ctrl_;
                 uint64_t b_page = get_backing_page(index);
                 
-		Controller* c = cache.d_ctrls[ctrl];
+		        Controller* c = cache.d_ctrls[ctrl];
                 c->access_counter.fetch_add(1, simt::memory_order_relaxed);
                 //uint32_t queue = (tid/32) % (c->n_qps);
                 //uint32_t queue = c->queue_counter.fetch_add(1, simt::memory_order_relaxed) % (c->n_qps);
                 //uint32_t queue = ((sm_id * 64) + warp_id()) % (c->n_qps);
                 //read_io_cnt.fetch_add(1, simt::memory_order_relaxed);
                 
-		read_data(&cache, (c->d_qps)+queue, ((b_page)*cache.n_blocks_per_page), cache.n_blocks_per_page, page_trans);
+		        read_data(&cache, (c->d_qps)+queue, ((b_page)*cache.n_blocks_per_page), cache.n_blocks_per_page, page_trans);
                 //page_addresses[index].store(page_trans, simt::memory_order_release);
-		pages[index].offset = page_trans;
+		        pages[index].offset = page_trans;
                 // while (cache.page_translation[global_page].load(simt::memory_order_acquire) != page_trans)
                 //     __nanosleep(100);
                 //miss_cnt.fetch_add(count, simt::memory_order_relaxed);
@@ -1593,9 +1598,13 @@ uint64_t range_d_t<T>::acquire_page(const size_t pg, const uint32_t count, const
                     pages[index].state.fetch_or(DIRTY, simt::memory_order_relaxed);
                 //new_state |= DIRTY;
                 //pages[index].state.fetch_or(new_state, simt::memory_order_relaxed);
+
+                // #define DISABLE_BUSY_ENABLE_VALID 0xc0000000U = 1100 0000 0000 0000 0000 0000 0000 0000
+                // 与1异或操作就是取反，此处就是操作结束后，清除BUSY，并将有效位置为1
                 pages[index].state.fetch_xor(DISABLE_BUSY_ENABLE_VALID, simt::memory_order_release);
                 return page_trans;
 
+                // FIXME：前面return了这里还怎么执行？？
                 fail = false;
             }
 
@@ -1925,6 +1934,7 @@ struct array_d_t {
                        uint32_t& eq_mask, int& master, uint32_t& count, uint64_t& base_master) const {
         uint32_t ctrl;
         uint32_t queue;
+        // __ffs用于找到一个整数的最低有效位
         uint32_t leader = __ffs(mask) - 1;
         auto r_ = d_ranges+r;
         if (lane == leader) {
@@ -1934,26 +1944,28 @@ struct array_d_t {
         }
 
         ctrl = 0; //__shfl_sync(mask, ctrl, leader);
+        // 所有活跃线程都会从指定的 leader 线程处获取 queue 的值。
         queue = __shfl_sync(mask, queue, leader);
 
-
+        // 这个变量实际上没用到
         uint32_t active_cnt = __popc(mask);
+        // 返回具有相同gaddr的线程掩码
         eq_mask = __match_any_sync(mask, gaddr);
         eq_mask &= __match_any_sync(mask, (uint64_t)this);
         master = __ffs(eq_mask) - 1;
-
+        
+        // 确定在给定的线程掩码 eq_mask 中是否有任何线程的 write 表达式为真
         uint32_t dirty = __any_sync(eq_mask, write);
 
         uint64_t base;
-        //bool memcpyflag_master;
-        //bool memcpyflag;
+
+        // 计算出有多少个线程在处理这个page
         count = __popc(eq_mask);
         if (master == lane) {
             //std::pair<uint64_t, bool> base_memcpyflag;
             base = r_->acquire_page(page, count, dirty, ctrl, queue);
             base_master = base;
-//                //printf("++tid: %llu\tbase: %p  page:%llu\n", (unsigned long long) threadIdx.x, base_master, (unsigned long long) page);
-        }
+
         base_master = __shfl_sync(eq_mask,  base_master, master);
     }
 
@@ -2428,6 +2440,8 @@ struct array_d_t {
 #ifndef __CUDACC__
             uint32_t mask = 1;
 #else
+            // Active mask query: returns a 32-bit mask 
+            // indicating which threads in a warp are active with the current executing thread.
             uint32_t mask = __activemask();
 #endif
             uint32_t eq_mask;

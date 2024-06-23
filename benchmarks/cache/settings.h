@@ -491,6 +491,4 @@ Settings::Settings()
 }
 
 
-
-
 #endif

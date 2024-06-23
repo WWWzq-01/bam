@@ -184,7 +184,7 @@ int main(int argc, char** argv) {
         unsigned long long* d_req_count;
         cuda_err_chk(cudaMalloc(&d_req_count, sizeof(unsigned long long)));
         cuda_err_chk(cudaMemset(d_req_count, 0, sizeof(unsigned long long)));
-        std::cout << "atlaunch kernel\n";
+        std::cout << "at launch kernel\n";
         char st[15];
         cuda_err_chk(cudaDeviceGetPCIBusId(st, 15, settings.cudaDevice));
         std::cout << st << std::endl;
@@ -200,16 +200,18 @@ int main(int argc, char** argv) {
             cuda_err_chk(cudaMemcpy(d_assignment, assignment,  n_warps*sizeof(uint64_t), cudaMemcpyHostToDevice));
         }
         
-        for(uint64_t id=0; id<2;id++){
+        for(uint64_t id=0; id<3;id++){
 
         Event before;
                 
         if (settings.random) {
                 //printf("blockDim.x is %llu \t blocksize: %llu\n", g_size, b_size );
-                random_access_warp<TYPE><<<g_size, b_size>>>(a.d_array_ptr, n_pages_per_warp, d_req_count, type, d_assignment, n_warps, page_size, settings.stride);
+                random_access_warp<TYPE><<<g_size, b_size>>>(a.d_array_ptr, n_pages_per_warp, 
+                    d_req_count, type, d_assignment, n_warps, page_size, settings.stride);
         }
         else {
-                sequential_access_warp<TYPE><<<g_size, b_size>>>(a.d_array_ptr, n_pages_per_warp, d_req_count, type, d_assignment, n_warps, page_size);
+                sequential_access_warp<TYPE><<<g_size, b_size>>>(a.d_array_ptr, n_pages_per_warp, 
+                d_req_count, type, d_assignment, n_warps, page_size);
         }
         Event after;
 
@@ -221,10 +223,20 @@ int main(int argc, char** argv) {
         double iops = ((double)ios)/(elapsed/1000000);
         double bandwidth = (((double)data)/(elapsed/1000000))/(1024ULL*1024ULL*1024ULL);
         a.print_reset_stats();
-        std::cout << std::dec << "Itr:" << id << " type: "<< settings.random <<" Elapsed Time: " << elapsed << "\tNumber of Read Ops: "<< ios << "\tData Size (bytes): " << data ;
-        std::cout << std::dec << "Read Ops/sec: " << iops << "\tEffective Bandwidth(GB/S): " << bandwidth << std::endl;
+        std::cout << std::dec 
+        << "Itr:" << id 
+        << " type: "<< settings.random 
+        <<" Elapsed Time: " << elapsed 
+        << "\tNumber of Read Ops: "<< ios 
+        << "\tData Size (bytes): " << data ;
 
-		printf("ID:%d \t type:%d \t n_warps:%llu \t n_pages_per_warp: %llu \t n_elems_per_page:%llu \t ios: %llu \t IOPs: %f \t data:%llu \t bandwidth: %f GBps \t time: %f\n",id, settings.random,  n_warps, n_pages_per_warp, n_elems_per_page, ios, iops, data, bandwidth, elapsed); 
+        std::cout << std::dec 
+        << "\tRead Ops/sec: " << iops 
+        << "\tEffective Bandwidth(GB/S): " << bandwidth 
+        << std::endl;
+
+		printf("ID:%d \t type:%d \t n_warps:%llu \t n_pages_per_warp: %llu \t n_elems_per_page:%llu \t ios: %llu \t IOPs: %f \t data:%llu \t bandwidth: %f GBps \t time: %f\n"
+        ,id, settings.random,  n_warps, n_pages_per_warp, n_elems_per_page, ios, iops, data, bandwidth, elapsed); 
         }
         for (size_t i = 0 ; i < settings.n_ctrls; i++)
             delete ctrls[i];
