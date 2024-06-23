@@ -38,15 +38,28 @@ enum data_dist_t {REPLICATE = 0, STRIPE = 1};
 #define USE_DIRTY (VALID_DIRTY | USE)
 
 #define INVALID 0x00000000U
+// 1000 0000 0000 0000 0000 0000 0000 0000 
 #define VALID   0x80000000U
+// 0100 0000 0000 0000 0000 0000 0000 0000
 #define BUSY    0x40000000U
+// 0010 0000 0000 0000 0000 0000 0000 0000
 #define DIRTY   0x20000000U
+// 32位中，前3位为状态位，后28位为引用计数器
 #define CNT_SHIFT (29ULL)
+// 29个1，用于将状态位清零， `& CNT_MASK`
 #define CNT_MASK 0x1fffffffU
+// 0111
 #define VALID_MASK 0x7
+// 1011
 #define BUSY_MASK 0xb
+// 1100 0000 0000 0000 0000 0000 0000 0000
+// xor运算，将前两位反转
 #define DISABLE_BUSY_ENABLE_VALID 0xc0000000U
+// 1011 1111 1111 1111 1111 1111 1111 1111
+// 用于将busy位清零， `& DISABLE_BUSY_MASK`
 #define DISABLE_BUSY_MASK 0xbfffffffU
+
+// 两位表示V和B的四个状态,1为有效，V：Valid，B：Busy
 #define NV_NB 0x00U
 #define NV_B 0x01U
 #define V_NB 0x02U
@@ -732,14 +745,15 @@ struct page_cache_d_t {
     uint64_t* prp1;                  //len = num of pages in cache
     uint64_t* prp2;                  //len = num of pages in cache if page_size = ctrl.page_size *2
     uint64_t    ctrl_page_size;
-    uint64_t  range_cap;
-    pages_t*   ranges;
+    uint64_t  range_cap;             // range的容量   
+    pages_t*   ranges;               // range数组   
     pages_t*   h_ranges;
     uint64_t n_ranges;
     uint64_t n_ranges_bits;
     uint64_t n_ranges_mask;
     uint64_t n_cachelines_for_states;
 
+    // 指向每个范围的起始页的数组
     uint64_t* ranges_page_starts;
     data_dist_t* ranges_dists;
     simt::atomic<uint64_t, simt::thread_scope_device>* ctrl_counter;
@@ -752,7 +766,7 @@ struct page_cache_d_t {
     Controller** d_ctrls;
     uint64_t n_ctrls;
     bool prps;
-
+    // 每一页的块数量
     uint64_t n_blocks_per_page;
 
     //window buffer ptrs
@@ -962,10 +976,13 @@ struct page_cache_t {
         pdt.cpu_agg = cpu_agg;
 
         ctrl_counter_buf = createBuffer(sizeof(simt::atomic<uint64_t, simt::thread_scope_device>), cudaDevice);
+        // q_head,q_tail,q_lock都是simt::atomic<uint64_t, simt::thread_scope_device>类型的指针变量
         q_head_buf = createBuffer(sizeof(simt::atomic<uint64_t, simt::thread_scope_device>), cudaDevice);
         q_tail_buf = createBuffer(sizeof(simt::atomic<uint64_t, simt::thread_scope_device>), cudaDevice);
         q_lock_buf = createBuffer(sizeof(simt::atomic<uint64_t, simt::thread_scope_device>), cudaDevice);
         extra_reads_buf = createBuffer(sizeof(simt::atomic<uint64_t, simt::thread_scope_device>), cudaDevice);
+
+        // 智能指针的get用于获取指向的原始指针
         pdt.ctrl_counter = (simt::atomic<uint64_t, simt::thread_scope_device>*)ctrl_counter_buf.get();
         pdt.page_size = ps;
         pdt.q_head = (simt::atomic<uint64_t, simt::thread_scope_device>*)q_head_buf.get();
@@ -978,10 +995,12 @@ struct page_cache_t {
         pdt.n_pages_minus_1 = np - 1;
         pdt.n_ctrls = ctrls.size();
         d_ctrls_buff = createBuffer(pdt.n_ctrls * sizeof(Controller*), cudaDevice);
+        // d_ctrls对应设备的ctrls
         pdt.d_ctrls = (Controller**) d_ctrls_buff.get();
         pdt.n_blocks_per_page = (ps/ctrl.blk_size);
         pdt.n_cachelines_for_states = np/STATES_PER_CACHELINE;
         for (size_t k = 0; k < pdt.n_ctrls; k++)
+            // 将host上的ctrl指针复制到device上
             cuda_err_chk(cudaMemcpy(pdt.d_ctrls+k, &(ctrls[k]->d_ctrl_ptr), sizeof(Controller*), cudaMemcpyHostToDevice));
         
 
@@ -999,14 +1018,6 @@ struct page_cache_t {
 
         h_ranges_page_starts = new uint64_t[max_range];
         std::memset(h_ranges_page_starts, 0, max_range * sizeof(uint64_t));
-
-        //pages_translation_buf = createBuffer(np * sizeof(uint32_t), cudaDevice);
-        //pdt.page_translation = (uint32_t*)page_translation_buf.get();
-        //page_translation_buf = createBuffer(np * sizeof(padded_struct_pc), cudaDevice);
-        //page_translation = (padded_struct_pc*)page_translation_buf.get();
-
-        //page_take_lock_buf = createBuffer(np * sizeof(padded_struct_pc), cudaDevice);
-        //pdt.page_take_lock =  (padded_struct_pc*)page_take_lock_buf.get();
 
         cache_pages_buf = createBuffer(np * sizeof(cache_page_t), cudaDevice);
         pdt.cache_pages = (cache_page_t*)cache_pages_buf.get();
@@ -1042,14 +1053,17 @@ struct page_cache_t {
         const uint32_t uints_per_page = ctrl.ctrl->page_size / sizeof(uint64_t);
         if ((pdt.page_size > (ctrl.ctrl->page_size * uints_per_page)) || (np == 0) || (pdt.page_size < ctrl.ns.lba_data_size))
             throw error(string("page_cache_t: Can't have such page size or number of pages"));
+        // this->pages_dma.get()返回的是nvm_dma_t
         if (ps <= this->pages_dma.get()->page_size) {
             std::cout << "Cond1\n";
+            // 计算每个ssd页中有多少个ps大小的页
             uint64_t how_many_in_one = ctrl.ctrl->page_size/ps;
             this->prp1_buf = createBuffer(np * sizeof(uint64_t), cudaDevice);
             pdt.prp1 = (uint64_t*) this->prp1_buf.get();
 
 
             std::cout << np << " " << sizeof(uint64_t) << " " << how_many_in_one << " " << this->pages_dma.get()->n_ioaddrs <<std::endl;
+            // how_many_in_one *  this->pages_dma.get()->n_ioaddrs 代表创建的dma缓冲区所能对应的pagecache的page数量
             uint64_t* temp = new uint64_t[how_many_in_one *  this->pages_dma.get()->n_ioaddrs];
             std::memset(temp, 0, how_many_in_one *  this->pages_dma.get()->n_ioaddrs);
             if (temp == NULL)
@@ -1068,16 +1082,15 @@ struct page_cache_t {
             //std::cout << "HERE2\n";
             pdt.prps = false;
         }
-
+        // 两个物理页对应一个page cache中的page
         else if ((ps > this->pages_dma.get()->page_size) && (ps <= (this->pages_dma.get()->page_size * 2))) {
             this->prp1_buf = createBuffer(np * sizeof(uint64_t), cudaDevice);
             pdt.prp1 = (uint64_t*) this->prp1_buf.get();
             this->prp2_buf = createBuffer(np * sizeof(uint64_t), cudaDevice);
             pdt.prp2 = (uint64_t*) this->prp2_buf.get();
-            //uint64_t* temp1 = (uint64_t*) malloc(np * sizeof(uint64_t));
+            // 怀疑这个数组的长度不对，应该是np
             uint64_t* temp1 = new uint64_t[np * sizeof(uint64_t)];
             std::memset(temp1, 0, np * sizeof(uint64_t));
-            //uint64_t* temp2 = (uint64_t*) malloc(np * sizeof(uint64_t));
             uint64_t* temp2 = new uint64_t[np * sizeof(uint64_t)];
             std::memset(temp2, 0, np * sizeof(uint64_t));
             for (size_t i = 0; i < np; i++) {
@@ -1092,36 +1105,34 @@ struct page_cache_t {
             pdt.prps = true;
         }
         else {
+            // pages_dma设置的是ps*np
+            // prp_list_dma设置的是ctrl.ctrl->page_size  * np;
+            // 为什么需要prp_list_dma呢
             this->prp1_buf = createBuffer(np * sizeof(uint64_t), cudaDevice);
             pdt.prp1 = (uint64_t*) this->prp1_buf.get();
+
             uint32_t prp_list_size =  ctrl.ctrl->page_size  * np;
             this->prp_list_dma = createDma(ctrl.ctrl, NVM_PAGE_ALIGN(prp_list_size, 1UL << 16), cudaDevice);
+            
             this->prp2_buf = createBuffer(np * sizeof(uint64_t), cudaDevice);
             pdt.prp2 = (uint64_t*) this->prp2_buf.get();
+            // temp1,2的长度应该是np，temp3的长度应该是（how_many_in_one-1）*np
             uint64_t* temp1 = new uint64_t[np * sizeof(uint64_t)];
             uint64_t* temp2 = new uint64_t[np * sizeof(uint64_t)];
             uint64_t* temp3 = new uint64_t[prp_list_size];
             std::memset(temp1, 0, np * sizeof(uint64_t));
             std::memset(temp2, 0, np * sizeof(uint64_t));
             std::memset(temp3, 0, prp_list_size);
+            // 计算每个pagecache的page需要多少个ssd的page
             uint32_t how_many_in_one = ps /  ctrl.ctrl->page_size ;
             for (size_t i = 0; i < np; i++) {
                 temp1[i] = ((uint64_t) this->pages_dma.get()->ioaddrs[i*how_many_in_one]);
                 temp2[i] = ((uint64_t) this->prp_list_dma.get()->ioaddrs[i]);
                 for(size_t j = 0; j < (how_many_in_one-1); j++) {
+                    //       const uint32_t uints_per_page = ctrl.ctrl->page_size / sizeof(uint64_t);
                     temp3[i*uints_per_page + j] = ((uint64_t) this->pages_dma.get()->ioaddrs[i*how_many_in_one + j + 1]);
                 }
             }
-            /*
-              for (size_t i = 0; i < this->pages_dma.get()->n_ioaddrs; i+=how_many_in_one) {
-              temp1[i/how_many_in_one] = ((uint64_t)this->pages_dma.get()->ioaddrs[i]);
-              temp2[i/how_many_in_one] = ((uint64_t)this->prp_list_dma.get()->ioaddrs[i]);
-              for (size_t j = 0; j < (how_many_in_one-1); j++) {
-
-              temp3[(i/how_many_in_one)*uints_per_page + j] = ((uint64_t)this->pages_dma.get()->ioaddrs[i+1+j]);
-              }
-              }
-            */
 
             std::cout << "Done creating PRP\n";
             cuda_err_chk(cudaMemcpy(pdt.prp1, temp1, np * sizeof(uint64_t), cudaMemcpyHostToDevice));
@@ -1283,6 +1294,8 @@ struct range_t {
 
 template <typename T>
 range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint64_t pso, uint64_t p_size, page_cache_t* c_h, uint32_t cudaDevice, data_dist_t dist) {
+    // p_size 实际上没有被用到
+    
     rdt.access_cnt = 0;
     rdt.miss_cnt = 0;
     rdt.hit_cnt = 0;
@@ -1372,6 +1385,7 @@ uint64_t range_d_t<T>::get_sector_size() const {
 template <typename T>
 __forceinline__
 __device__
+// 用于确定某个元素属于哪个内存页
 uint64_t range_d_t<T>::get_page(const size_t i) const {
     uint64_t index = ((i - index_start) * sizeof(T) + page_start_offset) >> (cache.page_size_log);
     return index;
@@ -1379,6 +1393,7 @@ uint64_t range_d_t<T>::get_page(const size_t i) const {
 template <typename T>
 __forceinline__
 __device__
+// 获得某个元素在内存页中的页内偏移
 uint64_t range_d_t<T>::get_subindex(const size_t i) const {
     uint64_t index = ((i - index_start) * sizeof(T) + page_start_offset) & (cache.page_size_minus_1);
     return index;
@@ -1387,6 +1402,9 @@ template <typename T>
 __forceinline__
 __device__
 uint64_t range_d_t<T>::get_global_address(const size_t page) const {
+
+    // | range_id: 这是位或（OR）操作，用于将上述结果与 range_id 合并。
+    // range_id 是当前数据范围或数据块的唯一标识符，通过位或操作，range_id 直接被添加到左移后的页号的低位上。这样可以在不同的数据范围之间区分相同的页号。
     return ((page << cache.n_ranges_bits) | range_id);
 }
 template <typename T>
@@ -1404,15 +1422,16 @@ void range_d_t<T>::release_page(const size_t pg) const {
             pages[index].prefetch_counter.store(0,simt::memory_order_release);
             }
         else{
+            // 这个变量好像没有被用到
             uint8_t wb_count_after = pages[index].prefetch_counter.fetch_sub(1, simt::memory_order_release);
         }
     }
 
 
-
-
-    //printf("release2 idx:%llu p_count:%lu  count: %lu tc:%lu\n",(unsigned long long) pg, (unsigned long) window_count, (unsigned long) count,(unsigned long)tc);    
     uint64_t st = pages[index].state.fetch_sub(1+tc, simt::memory_order_release);
+    // #define CNT_MASK 0x1fffffffU
+    // 获得低29位的值
+    // 这个变量好像也没有被用到
 	uint32_t cnt = st & CNT_MASK;
 
 
@@ -1463,7 +1482,11 @@ template <typename T>
 __forceinline__
 __device__
 cache_page_t* range_d_t<T>::get_cache_page(const size_t pg) const {
+    // pages_t pages;
+    // typedef data_page_t* pages_t;
     uint32_t page_trans = pages[pg].offset;
+    // page_cache_d_t cache;
+    // 返回cache_page_t * 类型
     return cache.get_cache_page(page_trans);
 }
 
@@ -1506,8 +1529,8 @@ template <typename T>
 __forceinline__
 __device__
 void range_d_t<T>::set_prefetch_val(const size_t pg, const size_t count) const{
-	 uint64_t index = pg;
-	 uint8_t p_count = count;
+	uint64_t index = pg;
+	uint8_t p_count = count;
 	pages[index].prefetch_count.fetch_add(count, simt::memory_order_release); 
 }
 
@@ -1937,6 +1960,7 @@ struct array_d_t {
         // __ffs用于找到一个整数的最低有效位
         uint32_t leader = __ffs(mask) - 1;
         auto r_ = d_ranges+r;
+        // 一个warp中选出一个leader线程，该线程负责选择ctrl和queue
         if (lane == leader) {
             page_cache_d_t* pc = &(r_->cache);
             ctrl = 0;//pc->ctrl_counter->fetch_add(1, simt::memory_order_relaxed) % (pc->n_ctrls);
@@ -1944,28 +1968,34 @@ struct array_d_t {
         }
 
         ctrl = 0; //__shfl_sync(mask, ctrl, leader);
-        // 所有活跃线程都会从指定的 leader 线程处获取 queue 的值。
+        // 返回queue的值并进行同步
         queue = __shfl_sync(mask, queue, leader);
 
         // 这个变量实际上没用到
         uint32_t active_cnt = __popc(mask);
-        // 返回具有相同gaddr的线程掩码
+        // __match_any_sync表示比较被 mask 指定的所有线程中的变量 value，返回具有相同值gaddr的线程编号构成的无符号整数。
         eq_mask = __match_any_sync(mask, gaddr);
+        // 第二步：更新eq_mask，找到具有相同gaddr值和相同this指针值的线程
         eq_mask &= __match_any_sync(mask, (uint64_t)this);
+        // 现在，eq_mask包含了所有具有相同gaddr值和相同this指针值的线程编号
+
         master = __ffs(eq_mask) - 1;
-        
-        // 确定在给定的线程掩码 eq_mask 中是否有任何线程的 write 表达式为真
+
+        // 判断是否存在聚合的线程是否要对该cacheline写入（是否要将该cacheline 标记为dirty）
         uint32_t dirty = __any_sync(eq_mask, write);
 
         uint64_t base;
-
-        // 计算出有多少个线程在处理这个page
+        //bool memcpyflag_master;
+        //bool memcpyflag;
+        // 获取具有相同gaddr值和相同this指针值的线程数量
         count = __popc(eq_mask);
         if (master == lane) {
             //std::pair<uint64_t, bool> base_memcpyflag;
             base = r_->acquire_page(page, count, dirty, ctrl, queue);
             base_master = base;
-
+//                //printf("++tid: %llu\tbase: %p  page:%llu\n", (unsigned long long) threadIdx.x, base_master, (unsigned long long) page);
+        }
+        //  master 线程的 base_master 的值广播到所有 eq_mask 为 1 的线程。
         base_master = __shfl_sync(eq_mask,  base_master, master);
     }
 
@@ -2431,6 +2461,7 @@ struct array_d_t {
     __forceinline__
     __device__
     T seq_read(const size_t i) const {
+        // 这个函数的作用是获取当前线程在其所在的 warp 中的线程 ID，也就是 lane ID。
 	    uint32_t lane = lane_id();
         int64_t r = find_range(i);
         auto r_ = d_ranges+r;
@@ -2440,16 +2471,20 @@ struct array_d_t {
 #ifndef __CUDACC__
             uint32_t mask = 1;
 #else
-            // Active mask query: returns a 32-bit mask 
-            // indicating which threads in a warp are active with the current executing thread.
+            // 获取当前活动的线程掩码。在 CUDA 中，线程掩码是一个 32 位的整数，每一位都对应一个线程，如果某一位为 1，那么对应的线程就是活动的。
             uint32_t mask = __activemask();
 #endif
             uint32_t eq_mask;
+            // master 是代表线程
             int master;
             uint64_t base_master;
             uint32_t count;
+            // 获取包含索引 i 的页面。
             uint64_t page = r_->get_page(i);
+            // 获取索引 i 在其所在的页面中的子索引。
             uint64_t subindex = r_->get_subindex(i);
+            // 获取页面的全局地址。
+            // 这个全局地址到底是什么
             uint64_t gaddr = r_->get_global_address(page);
 
             coalesce_page(lane, mask, r, page, gaddr, false, eq_mask, master, count, base_master);
@@ -2457,6 +2492,7 @@ struct array_d_t {
             //if (threadIdx.x == 63) {
             ////printf("--tid: %llu\tpage: %llu\tsubindex: %llu\tbase_master: %llu\teq_mask: %x\tmaster: %llu\n", (unsigned long long) threadIdx.x, (unsigned long long) page, (unsigned long long) subindex, (unsigned long long) base_master, (unsigned) eq_mask, (unsigned long long) master);
             //}
+            // 从缓存中读取数据，并存储到 ret 中
             ret = ((T*)(r_->get_cache_page_addr(base_master)+subindex))[0];
             __syncwarp(eq_mask);
             if (master == lane)
@@ -2690,6 +2726,7 @@ struct array_t {
     void print_reset_stats(void) {
         std::vector<range_d_t<T>> rdt(adt.n_ranges);
         //range_d_t<T>* rdt = new range_d_t<T>[adt.n_ranges];
+        //  adt.d_ranges的类型是range_d_t<T>* ，实际上就是一个range_d_t<T>的数组,相当于将这个数组拷贝到对应的vector中
         cuda_err_chk(cudaMemcpy(rdt.data(), adt.d_ranges, adt.n_ranges*sizeof(range_d_t<T>), cudaMemcpyDeviceToHost));
         for (size_t i = 0; i < adt.n_ranges; i++) {
 
@@ -2699,7 +2736,7 @@ struct array_t {
                                   << "\tMiss Rate:" << ((float)rdt[i].miss_cnt/rdt[i].access_cnt)
                                   << "\t#Hits: "    << rdt[i].hit_cnt 
                                   << "\tHit Rate:"  << ((float)rdt[i].hit_cnt/rdt[i].access_cnt) 
-                                  << "\tCLSize:"    << rdt[i].page_size 
+                                  << "\tCLSih'h'hze:"    << rdt[i].page_size 
 				  << "\tDebug Cnt: " << rdt[i].debug_cnt
                                   << std::endl;
             std::cout << "*********************************" << std::endl;
@@ -2757,7 +2794,7 @@ cache_page_t* page_cache_d_t::get_cache_page(const uint32_t page) const {
 
 __forceinline__
 __device__
-        uint32_t page_cache_d_t::wb_find_slot(uint64_t address, uint64_t range_id, const uint32_t queue_, simt::atomic<uint64_t, simt::thread_scope_device>& access_cnt, uint64_t* evicted_p_array,
+uint32_t page_cache_d_t::wb_find_slot(uint64_t address, uint64_t range_id, const uint32_t queue_, simt::atomic<uint64_t, simt::thread_scope_device>& access_cnt, uint64_t* evicted_p_array,
                                       uint32_t* wb_queue_counter,  uint32_t  wb_depth,  uint64_t* queue_ptr,
                                       int& evict_cpu, uint32_t& queue_idx, uint32_t& queue_reuse, uint64_t* id_array, uint32_t q_depth,
                                       uint8_t time_step, uint32_t head_ptr, uint32_t& evict_time) {
@@ -2908,7 +2945,7 @@ __device__
 
 __forceinline__
 __device__
-        uint32_t page_cache_d_t::wb_find_slot_cpu_agg(uint64_t address, uint64_t range_id, const uint32_t queue_, simt::atomic<uint64_t, simt::thread_scope_device>& access_cnt, uint64_t* evicted_p_array,
+uint32_t page_cache_d_t::wb_find_slot_cpu_agg(uint64_t address, uint64_t range_id, const uint32_t queue_, simt::atomic<uint64_t, simt::thread_scope_device>& access_cnt, uint64_t* evicted_p_array,
                                       uint32_t* wb_queue_counter,  uint32_t  wb_depth,  uint64_t* queue_ptr,
                                       int& evict_cpu, uint32_t& queue_idx, uint32_t& queue_reuse, uint64_t* id_array, uint32_t q_depth,
                                       uint8_t time_step, uint32_t head_ptr, uint32_t& evict_time) {
@@ -3091,16 +3128,9 @@ uint32_t page_cache_d_t::find_slot(uint64_t address, uint64_t range_id, const ui
     uint64_t new_expected_state = 0;
 
     do {
-
-//	if (++count %100000 == 0)
-//		printf("here\tc: %llu\n", (unsigned long long) count);
-
-        //if (count < this->n_pages)
         page = page_ticket->fetch_add(1, simt::memory_order_relaxed)  % (this->n_pages);
         bool lock = false;
         uint32_t v = this->cache_pages[page].page_take_lock.load(simt::memory_order_relaxed);
-        //this->page_take_lock[page].compare_exchange_strong(unlocked, LOCKED, simt::memory_order_acquire, simt::memory_order_relaxed);
-        //not assigned to anyone yet
         if ( v == FREE ) {
     		lock = this->cache_pages[page].page_take_lock.compare_exchange_weak(v, LOCKED, simt::memory_order_acquire, simt::memory_order_relaxed);
             if ( lock ) {

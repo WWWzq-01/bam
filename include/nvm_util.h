@@ -272,14 +272,14 @@ uint32_t nvm_dis_node_from_ctrl(const nvm_ctrl_t* ctrl);
 }
 #endif
 #endif
-
+// 这个函数的作用是获取当前线程在其所在的 warp 中的线程 ID，也就是 lane ID。
 __forceinline__ __device__ uint32_t lane_id()
 {
     uint32_t ret;
     asm volatile ("mov.u32 %0, %laneid;" : "=r"(ret));
     return ret;
 }
-
+// 获取当前线程所在的 warp 的 ID
 __forceinline__ __device__ unsigned warp_id()
 {
     // this is not equal to threadIdx.x / 32
@@ -287,7 +287,7 @@ __forceinline__ __device__ unsigned warp_id()
     asm volatile ("mov.u32 %0, %warpid;" : "=r"(ret));
     return ret;
 }
-
+// 这个函数的作用是获取当前线程所在的 Streaming Multiprocessor（流多处理器，简称 SM）的 ID。
 __forceinline__ __device__ uint32_t get_smid() {
      uint32_t ret;
      asm  ("mov.u32 %0, %smid;" : "=r"(ret) );

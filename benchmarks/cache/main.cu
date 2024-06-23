@@ -82,23 +82,23 @@ void random_access_warp(array_d_t<T>* dr, uint64_t n_pages_per_warp, unsigned lo
 template<typename T>
 __global__ __launch_bounds__(64,32)
 void sequential_access_warp(array_d_t<T>* dr, uint64_t n_pages_per_warp, unsigned long long* sum, uint64_t type, uint64_t* assignment, uint64_t n_warps, size_t page_size) {
-
+    // 没有使用assignment, 但是为了保持函数参数一致，还是保留了这个参数
     const uint64_t tid = blockIdx.x * blockDim.x + threadIdx.x;
     const uint64_t lane = tid % 32;
     const uint64_t warp_id = tid / 32;
     const uint64_t n_elems_per_page = page_size / sizeof(T);
     T v = 0;
     if (warp_id < n_warps) {
-	bam_ptr<T> ptr(dr);
+	    bam_ptr<T> ptr(dr);
         size_t start_page = n_pages_per_warp * warp_id;;
-//	if (lane == 0) printf("start_page: %llu\n", (unsigned long long) start_page);
+	if (lane == 0) printf("start_page: %llu\n", (unsigned long long) start_page);
         for (size_t i = 0; i < n_pages_per_warp; i++) {
             size_t cur_page = start_page + i;
-//	    printf("warp_id: %llu\tcur_page: %llu\n", (unsigned long long) warp_id, (unsigned long long) cur_page);
+	        //printf("warp_id: %llu\tcur_page: %llu\n", (unsigned long long) warp_id, (unsigned long long) cur_page);
             size_t start_idx = cur_page * n_elems_per_page + lane;
 
             for (size_t j = 0; j < n_elems_per_page; j += 32) {
-//		printf("startidx: %llu\n", (unsigned long long) (start_idx+j));
+		        //printf("startidx: %llu\n", (unsigned long long) (start_idx+j));
                 if (type == ORIG) {
                     v += (*dr)[start_idx + j];
                 }
@@ -144,6 +144,8 @@ int main(int argc, char** argv) {
             ctrls[i] = new Controller(ctrls_paths[i], settings.nvmNamespace, settings.cudaDevice, settings.queueDepth, settings.numQueues);
 
         uint64_t b_size = 64;
+        // 总线程数 (n_threads) = Block Size (b_size) × Grid Size (g_size)
+        // 向上取整
         uint64_t g_size = (settings.numThreads + b_size - 1)/b_size;//80*16;
         uint64_t n_threads = b_size * g_size;
         uint64_t n_warps = n_threads/32;
@@ -174,10 +176,11 @@ int main(int argc, char** argv) {
 
         std::cout << "finished creating range\n";
 
-
+        // TODO:numReqs代表每个线程的请求数量，为什么n_pages_per_warp的值是numReqs呢
         uint64_t n_pages_per_warp = settings.numReqs;
         uint64_t gran = settings.gran; //(settings.gran == WARP) ? 32 : b_size;
         uint64_t type = settings.type;
+        std::cout << std::dec;
 
         uint64_t n_elems_per_page = page_size / sizeof(uint64_t);
         std::cout << "n_elems_per_page: " << n_elems_per_page << std::endl;
@@ -216,9 +219,10 @@ int main(int argc, char** argv) {
         Event after;
 
         cuda_err_chk(cudaDeviceSynchronize());
-
         double elapsed = after - before;
-        uint64_t ios = n_warps*n_pages_per_warp*n_elems_per_page;
+        // n_pages_per_warp = settings.numReqs;
+        // uint64_t n_elems_per_page = page_size / sizeof(uint64_t);
+        uint64_t ios = n_warps*n_pages_per_warp*n_elems_per_page; // 32 * 1 * 512 = 16384
         uint64_t data = ios*sizeof(uint64_t);
         double iops = ((double)ios)/(elapsed/1000000);
         double bandwidth = (((double)data)/(elapsed/1000000))/(1024ULL*1024ULL*1024ULL);
