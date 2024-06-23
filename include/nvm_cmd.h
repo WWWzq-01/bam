@@ -84,6 +84,7 @@ void nvm_cmd_rw_blks(nvm_cmd_t* cmd, uint64_t start_lba, uint16_t n_blks)
 {
     cmd->dword[10] = start_lba;
     cmd->dword[11] = start_lba >> 32;
+    // set the number of blocks
     cmd->dword[12] = (cmd->dword[12] & 0xffff0000) | ((n_blks - 1) & 0xffff);
 }
 

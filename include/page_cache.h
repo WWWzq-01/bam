@@ -2749,7 +2749,7 @@ struct array_t {
             rdt[i].access_cnt = 0;
             rdt[i].miss_cnt = 0;
             rdt[i].hit_cnt = 0;
-	    rdt[i].debug_cnt = 0;
+	        rdt[i].debug_cnt = 0;
         }
         cuda_err_chk(cudaMemcpy(adt.d_ranges, rdt.data(), adt.n_ranges*sizeof(range_d_t<T>), cudaMemcpyHostToDevice));
     }
@@ -3334,12 +3334,9 @@ inline __device__ void read_data(page_cache_d_t* pc, QueuePair* qp, const uint64
 
     //uint16_t n_blocks = CEIL(num_bytes, qp->block_size, qp->block_size_log);
 
-
-
     nvm_cmd_t cmd;
     uint16_t cid = get_cid(&(qp->sq));
     ////printf("cid: %u\n", (unsigned int) cid);
-
 
     nvm_cmd_header(&cmd, cid, NVM_IO_READ, qp->nvmNamespace);
     uint64_t prp1 = pc->prp1[pc_entry];
@@ -3363,14 +3360,10 @@ inline __device__ void read_data(page_cache_d_t* pc, QueuePair* qp, const uint64
     cq_dequeue(&qp->cq, cq_pos, &qp->sq, head, head_);
     //sq_dequeue(&qp->sq, sq_pos);
 
-
     //enqueue_second(page_cache_d_t* pc, QueuePair* qp, const uint64_t starting_lba, nvm_cmd_t* cmd, const uint16_t cid, const uint64_t pc_pos, const uint64_t pc_prev_head)
     enqueue_second(pc, qp, starting_lba, &cmd, cid, pc_pos, pc_prev_head);
 
-
-
     put_cid(&qp->sq, cid);
-
 
 }
 

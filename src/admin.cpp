@@ -150,6 +150,9 @@ int nvm_admin_ctrl_info(nvm_aq_ref ref, struct nvm_ctrl_info* info, void* ptr, u
     info->max_out_cmds = *((uint16_t*) (bytes + 514));
     info->max_n_ns = *((uint32_t*) (bytes + 516));
 
+    printf("Controller: NVMe version=%d, page_size=%lu, db_stride=%lu, timeout=%lu, contiguous=%d, max_entries=%u\n",
+            info->nvme_version, info->page_size, info->db_stride, info->timeout, info->contiguous, info->max_entries);
+
     return NVM_ERR_PACK(NULL, 0);
 }
 
@@ -196,6 +199,8 @@ int nvm_admin_ns_info(nvm_aq_ref ref, struct nvm_ns_info* info, uint32_t ns_id, 
     info->lba_data_size = 1 << _RB(lba_format, 23, 16);
     info->metadata_size = _RB(lba_format, 15, 0);
 
+    printf("Namespace %d: size=%lu, capacity=%lu, utilization=%lu, lba_data_size=%lu, metadata_size=%lu\n",
+            ns_id, info->size, info->capacity, info->utilization, info->lba_data_size, info->metadata_size);
     return NVM_ERR_PACK(NULL, 0);
 }
 

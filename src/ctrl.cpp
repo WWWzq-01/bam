@@ -143,7 +143,9 @@ void _nvm_ctrl_put(struct controller* controller)
 }
 
 
-
+/*
+* Helper function to initalize the controller handle by reading the appropriate registers from the controller
+*/
 int _nvm_ctrl_init(nvm_ctrl_t** handle, struct device* dev, const struct device_ops* ops, enum device_type type,
         volatile void* mm_ptr, size_t mm_size)
 {
