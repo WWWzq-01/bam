@@ -106,7 +106,17 @@ static void ioctl_unmap(const struct device* dev, const struct va_range* va)
 }
 
 
-
+/*
+* Initialize controller handle for ioctl device.
+* nvm_ctrl_init 用于初始化一个 NVM（非易失性存储器）控制器结构。它主要完成以下任务：
+* 设备结构分配：
+    分配一个 struct device 结构体，并初始化其中的成员。
+* 文件描述符管理：
+    复制输入的文件描述符 filedes 到 dev->fd。
+    设置文件描述符的控制标志为可读写模式（O_RDWR）。
+* 内存映射：
+    使用 mmap 函数将设备文件描述符的地址空间映射到内存中，并为其分配读写权限。
+*/
 int nvm_ctrl_init(nvm_ctrl_t** ctrl, int filedes)
 {
     int err;
