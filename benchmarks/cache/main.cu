@@ -157,7 +157,10 @@ int main(int argc, char** argv) {
         //uint64_t n_pages = total_cache_size/page_size;
 
 
-        page_cache_t h_pc(page_size, n_pages, settings.cudaDevice, ctrls[0][0], (uint64_t) 64, ctrls);
+        // page_cache_t h_pc(page_size, n_pages, settings.cudaDevice, ctrls[0][0], (uint64_t) 64, ctrls);
+        // 测试max_range的作用，因为下文实际上只存在一个range_t，所以max_range是1即可
+        page_cache_t h_pc(page_size, n_pages, settings.cudaDevice, ctrls[0][0], (uint64_t) 1, ctrls);
+
         std::cout << "finished creating cache\n";
 
         page_cache_t* d_pc = (page_cache_t*) (h_pc.d_pc_ptr);

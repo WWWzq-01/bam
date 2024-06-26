@@ -8,12 +8,12 @@ fi
 
 #when varying cacheline size, equally vary the num pages per cache (-p) to retain cache capacity.
 P=4096
-R=0 #1 random 0 sequential
+R=1 #1 random 0 sequential
 G=2
 B=64
 D=1024
 Q=135
-PTR=1
+PTR=0
 G=$2
 
 CTRLS=$1

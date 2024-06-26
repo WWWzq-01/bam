@@ -941,7 +941,7 @@ struct page_cache_t {
 
     template <typename T>
     void add_range(range_t<T>* range) {
-        range->rdt.range_id  = pdt.n_ranges++;
+        range->rdt.range_id = pdt.n_ranges++;
         h_ranges[range->rdt.range_id] = range->rdt.pages;
         h_ranges_page_starts[range->rdt.range_id] = range->rdt.page_start;
         h_ranges_dists[range->rdt.range_id] = range->rdt.dist;
@@ -1005,6 +1005,7 @@ struct page_cache_t {
         
 
         pdt.range_cap = max_range;
+        // 初始化为0，之后通过add_range函数添加
         pdt.n_ranges = 0;
         pdt.n_ranges_bits = (max_range == 1) ? 1 : std::log2(max_range);
         pdt.n_ranges_mask = max_range-1;
@@ -1325,7 +1326,7 @@ range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint6
         ts[i].prefetch_counter=0;
     }
     ////printf("S value: %llu\n", (unsigned long long)s);
-   uint64_t* evicted_p_array; 
+    uint64_t* evicted_p_array; 
 //    cuda_err_chk(cudaMallocManaged(&evicted_p_array, sizeof(uint64_t) * 700000));
 //    printf("e p array:%p\n", evicted_p_array);
     rdt.evicted_p_array=evicted_p_array;
@@ -2484,9 +2485,11 @@ struct array_d_t {
             // 获取索引 i 在其所在的页面中的子索引。
             uint64_t subindex = r_->get_subindex(i);
             // 获取页面的全局地址。
-            // 这个全局地址到底是什么
             uint64_t gaddr = r_->get_global_address(page);
 
+            uint64_t offset = (i-r_->index_start)*sizeof(T)+r_->page_start_offset;
+            printf("i:%llx,page:%#llx, subindex:%#llx, gaddr:%#llx,offset:%#llx,range_id:%#llx\n", 
+            (unsigned long long)i,(unsigned long long) page, (unsigned long long) subindex, (unsigned long long) gaddr,(unsigned long long)offset,(unsigned long long)r_->range_id);
             coalesce_page(lane, mask, r, page, gaddr, false, eq_mask, master, count, base_master);
 
             //if (threadIdx.x == 63) {
