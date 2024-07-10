@@ -451,6 +451,7 @@ struct bam_ptr {
     __forceinline__
     __host__ __device__
     T operator[](const size_t i) const {
+    // printf("T bam_ptr::operator[]\n");
 	if ((i < start) || (i >= end)) {
 	   	T* tmpaddr =  update_page(i);
         }
@@ -459,6 +460,7 @@ struct bam_ptr {
     
     __host__ __device__
     T* memref(size_t i) {
+    // printf("bam_ptr::memref\n");
         T* ret_; 
         if ((i < start) || (i >= end)) {
            ret_ =  update_page(i);
@@ -470,6 +472,7 @@ struct bam_ptr {
     __forceinline__
     __host__ __device__
     T& operator[](const size_t i) {
+    // printf("T& bam_ptr::operator[]\n");
 	if ((i < start) || (i >= end)) {
             update_page(i);
             page->state.fetch_or(DIRTY, simt::memory_order_relaxed);
@@ -946,9 +949,13 @@ struct page_cache_t {
         h_ranges_page_starts[range->rdt.range_id] = range->rdt.page_start;
         h_ranges_dists[range->rdt.range_id] = range->rdt.dist;
         cuda_err_chk(cudaMemcpy(pdt.ranges_page_starts, h_ranges_page_starts, pdt.n_ranges * sizeof(uint64_t), cudaMemcpyHostToDevice));
+        printf("range_t::copy size: %d\n", pdt.n_ranges * sizeof(uint64_t));
         cuda_err_chk(cudaMemcpy(pdt.ranges, h_ranges, pdt.n_ranges* sizeof(pages_t), cudaMemcpyHostToDevice));
+        printf("range_t::copy size: %d\n", pdt.n_ranges* sizeof(pages_t));
         cuda_err_chk(cudaMemcpy(pdt.ranges_dists, h_ranges_dists, pdt.n_ranges* sizeof(data_dist_t), cudaMemcpyHostToDevice));
+        printf("range_t::copy size: %d\n", pdt.n_ranges* sizeof(data_dist_t));
         cuda_err_chk(cudaMemcpy(d_pc_ptr, &pdt, sizeof(page_cache_d_t), cudaMemcpyHostToDevice));
+        printf("range_t::copy size: %d\n", sizeof(page_cache_d_t));
 
     }
 
@@ -982,6 +989,7 @@ struct page_cache_t {
         q_lock_buf = createBuffer(sizeof(simt::atomic<uint64_t, simt::thread_scope_device>), cudaDevice);
         extra_reads_buf = createBuffer(sizeof(simt::atomic<uint64_t, simt::thread_scope_device>), cudaDevice);
 
+        printf("page_cache_t::alloc size: %d\n", 5*sizeof(simt::atomic<uint64_t, simt::thread_scope_device>));
         // 智能指针的get用于获取指向的原始指针
         pdt.ctrl_counter = (simt::atomic<uint64_t, simt::thread_scope_device>*)ctrl_counter_buf.get();
         pdt.page_size = ps;
@@ -995,14 +1003,17 @@ struct page_cache_t {
         pdt.n_pages_minus_1 = np - 1;
         pdt.n_ctrls = ctrls.size();
         d_ctrls_buff = createBuffer(pdt.n_ctrls * sizeof(Controller*), cudaDevice);
+        printf("page_cache_t::alloc size: %d\n", pdt.n_ctrls * sizeof(Controller*));
         // d_ctrls对应设备的ctrls
         pdt.d_ctrls = (Controller**) d_ctrls_buff.get();
         pdt.n_blocks_per_page = (ps/ctrl.blk_size);
+        printf("n_blocks_per_page: %d\n", pdt.n_blocks_per_page);
+        
         pdt.n_cachelines_for_states = np/STATES_PER_CACHELINE;
         for (size_t k = 0; k < pdt.n_ctrls; k++)
             // 将host上的ctrl指针复制到device上
             cuda_err_chk(cudaMemcpy(pdt.d_ctrls+k, &(ctrls[k]->d_ctrl_ptr), sizeof(Controller*), cudaMemcpyHostToDevice));
-        
+        printf("page_cache_t::copy size: %d\n", pdt.n_ctrls * sizeof(Controller*));
 
         pdt.range_cap = max_range;
         // 初始化为0，之后通过add_range函数添加
@@ -1014,6 +1025,7 @@ struct page_cache_t {
 
         pdt.page_size_log = std::log2(ps);
         ranges_buf = createBuffer(max_range * sizeof(pages_t), cudaDevice);
+        printf("page_cache_t::alloc size: %d\n", max_range * sizeof(pages_t));
         pdt.ranges = (pages_t*)ranges_buf.get();
         h_ranges = new pages_t[max_range];
 
@@ -1021,12 +1033,15 @@ struct page_cache_t {
         std::memset(h_ranges_page_starts, 0, max_range * sizeof(uint64_t));
 
         cache_pages_buf = createBuffer(np * sizeof(cache_page_t), cudaDevice);
+        printf("page_cache_t::alloc size: %d\n", np * sizeof(cache_page_t));
         pdt.cache_pages = (cache_page_t*)cache_pages_buf.get();
 
         ranges_page_starts_buf = createBuffer(max_range * sizeof(uint64_t), cudaDevice);
+        printf("page_cache_t::alloc size: %d\n", max_range * sizeof(uint64_t));
         pdt.ranges_page_starts = (uint64_t*) ranges_page_starts_buf.get();
 
         page_ticket_buf = createBuffer(1 * sizeof(padded_struct_pc), cudaDevice);
+        printf("page_cache_t::alloc size: %d\n", 1 * sizeof(padded_struct_pc));
         pdt.page_ticket =  (padded_struct_pc*)page_ticket_buf.get();
         //std::vector<padded_struct_pc> tps(np, FREE);
         cache_page_t* tps = new cache_page_t[np];
@@ -1040,14 +1055,17 @@ struct page_cache_t {
             }
         }
         cuda_err_chk(cudaMemcpy(pdt.cache_pages, tps, np*sizeof(cache_page_t), cudaMemcpyHostToDevice));
+        printf("page_cache_t::copy size: %d\n", np*sizeof(cache_page_t));
         delete tps;
 
         ranges_dists_buf = createBuffer(max_range * sizeof(data_dist_t), cudaDevice);
+        printf("page_cache_t::alloc size: %d\n", max_range * sizeof(data_dist_t));
         pdt.ranges_dists = (data_dist_t*)ranges_dists_buf.get();
         h_ranges_dists = new data_dist_t[max_range];
 
         uint64_t cache_size = ps*np;
         this->pages_dma = createDma(ctrl.ctrl, NVM_PAGE_ALIGN(cache_size, 1UL << 16), cudaDevice);
+        printf("page_cache_t::alloc size: %d\n", NVM_PAGE_ALIGN(cache_size, 1UL << 16));
         pdt.base_addr = (uint8_t*) this->pages_dma.get()->vaddr;
         std::cout << "pages_dma: " << std::hex << this->pages_dma.get()->vaddr << "\t" << this->pages_dma.get()->ioaddrs[0] << std::endl;
         std::cout << "HEREN\n";
@@ -1060,6 +1078,7 @@ struct page_cache_t {
             // 计算每个ssd页中有多少个ps大小的页
             uint64_t how_many_in_one = ctrl.ctrl->page_size/ps;
             this->prp1_buf = createBuffer(np * sizeof(uint64_t), cudaDevice);
+            printf("page_cache_t::alloc size: %d\n", np * sizeof(uint64_t));
             pdt.prp1 = (uint64_t*) this->prp1_buf.get();
 
 
@@ -1077,6 +1096,7 @@ struct page_cache_t {
                 }
             }
             cuda_err_chk(cudaMemcpy(pdt.prp1, temp, np * sizeof(uint64_t), cudaMemcpyHostToDevice));
+            printf("page_cache_t::copy size: %d\n", np * sizeof(uint64_t));
             delete temp;
             //std::cout << "HERE1\n";
             //free(temp);
@@ -1086,8 +1106,10 @@ struct page_cache_t {
         // 两个物理页对应一个page cache中的page
         else if ((ps > this->pages_dma.get()->page_size) && (ps <= (this->pages_dma.get()->page_size * 2))) {
             this->prp1_buf = createBuffer(np * sizeof(uint64_t), cudaDevice);
+            printf("page_cache_t::alloc size: %d\n", np * sizeof(uint64_t));
             pdt.prp1 = (uint64_t*) this->prp1_buf.get();
             this->prp2_buf = createBuffer(np * sizeof(uint64_t), cudaDevice);
+            printf("page_cache_t::alloc size: %d\n", np * sizeof(uint64_t));
             pdt.prp2 = (uint64_t*) this->prp2_buf.get();
             // 怀疑这个数组的长度不对，应该是np
             uint64_t* temp1 = new uint64_t[np * sizeof(uint64_t)];
@@ -1099,7 +1121,9 @@ struct page_cache_t {
                 temp2[i] = ((uint64_t)this->pages_dma.get()->ioaddrs[i*2+1]);
             }
             cuda_err_chk(cudaMemcpy(pdt.prp1, temp1, np * sizeof(uint64_t), cudaMemcpyHostToDevice));
+            printf("page_cache_t::copy size: %d\n", np * sizeof(uint64_t));
             cuda_err_chk(cudaMemcpy(pdt.prp2, temp2, np * sizeof(uint64_t), cudaMemcpyHostToDevice));
+            printf("page_cache_t::copy size: %d\n", np * sizeof(uint64_t));
 
             delete temp1;
             delete temp2;
@@ -1110,12 +1134,14 @@ struct page_cache_t {
             // prp_list_dma设置的是ctrl.ctrl->page_size  * np;
             // 为什么需要prp_list_dma呢
             this->prp1_buf = createBuffer(np * sizeof(uint64_t), cudaDevice);
+            printf("page_cache_t::alloc size: %d\n", np * sizeof(uint64_t));
             pdt.prp1 = (uint64_t*) this->prp1_buf.get();
 
             uint32_t prp_list_size =  ctrl.ctrl->page_size  * np;
             this->prp_list_dma = createDma(ctrl.ctrl, NVM_PAGE_ALIGN(prp_list_size, 1UL << 16), cudaDevice);
-            
+            printf("page_cache_t::alloc size: %d\n", prp_list_size);
             this->prp2_buf = createBuffer(np * sizeof(uint64_t), cudaDevice);
+            printf("page_cache_t::alloc size: %d\n", np * sizeof(uint64_t));
             pdt.prp2 = (uint64_t*) this->prp2_buf.get();
             // temp1,2的长度应该是np，temp3的长度应该是（how_many_in_one-1）*np
             uint64_t* temp1 = new uint64_t[np * sizeof(uint64_t)];
@@ -1137,8 +1163,11 @@ struct page_cache_t {
 
             std::cout << "Done creating PRP\n";
             cuda_err_chk(cudaMemcpy(pdt.prp1, temp1, np * sizeof(uint64_t), cudaMemcpyHostToDevice));
+            printf("page_cache_t::copy size: %d\n", np * sizeof(uint64_t));
             cuda_err_chk(cudaMemcpy(pdt.prp2, temp2, np * sizeof(uint64_t), cudaMemcpyHostToDevice));
+            printf("page_cache_t::copy size: %d\n", np * sizeof(uint64_t));
             cuda_err_chk(cudaMemcpy(this->prp_list_dma.get()->vaddr, temp3, prp_list_size, cudaMemcpyHostToDevice));
+            printf("page_cache_t::copy size: %d\n", prp_list_size);
 
             delete temp1;
             delete temp2;
@@ -1148,8 +1177,10 @@ struct page_cache_t {
 
 
         pc_buff = createBuffer(sizeof(page_cache_d_t), cudaDevice);
+        printf("page_cache_t::alloc size: %d\n", sizeof(page_cache_d_t));
         d_pc_ptr = (page_cache_d_t*)pc_buff.get();
         cuda_err_chk(cudaMemcpy(d_pc_ptr, &pdt, sizeof(page_cache_d_t), cudaMemcpyHostToDevice));
+        printf("page_cache_t::copy size: %d\n", sizeof(page_cache_d_t));
         std::cout << "Finish Making Page Cache\n";
 
     }
@@ -1185,6 +1216,8 @@ struct range_d_t {
     simt::atomic<uint64_t, simt::thread_scope_device> miss_cnt;
     simt::atomic<uint64_t, simt::thread_scope_device> hit_cnt;
     simt::atomic<uint64_t, simt::thread_scope_device> read_io_cnt;
+    simt::atomic<uint64_t, simt::thread_scope_device> read_cnt;
+    simt::atomic<uint64_t, simt::thread_scope_device> acquire_cnt;
 
     simt::atomic<uint64_t, simt::thread_scope_device> debug_cnt;
     uint64_t* evicted_p_array;
@@ -1301,6 +1334,8 @@ range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint6
     rdt.miss_cnt = 0;
     rdt.hit_cnt = 0;
     rdt.read_io_cnt = 0;
+    rdt.read_cnt = 0;
+    rdt.acquire_cnt = 0;
     rdt.index_start = is;
     rdt.count = count;
 
@@ -1315,6 +1350,7 @@ range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint6
     rdt.n_elems_per_page = rdt.page_size / sizeof(T);
     cache = (page_cache_d_t*) c_h->d_pc_ptr;
     pages_buff = createBuffer(s * sizeof(data_page_t), cudaDevice);
+    printf("range_t::alloc size: %d\n", s * sizeof(data_page_t));
     rdt.pages = (pages_t) pages_buff.get();
     //std::vector<padded_struct_pc> ts(s, INVALID);
     data_page_t* ts = new data_page_t[s];
@@ -1332,7 +1368,7 @@ range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint6
     rdt.evicted_p_array=evicted_p_array;
     cuda_err_chk(cudaMemcpy(rdt.pages//_states
                             , ts, s * sizeof(data_page_t), cudaMemcpyHostToDevice));
-    
+    printf("range_t::copy size: %d\n", s * sizeof(data_page_t));
     delete ts;
 
 
@@ -1342,17 +1378,19 @@ range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint6
     //page_addresses = (padded_struct_pc*) page_addresses_buff.get();
 
     range_buff = createBuffer(sizeof(range_d_t<T>), cudaDevice);
+    printf("range_t::alloc size: %d\n", sizeof(range_d_t<T>));
     d_range_ptr = (range_d_t<T>*)range_buff.get();
     //rdt.range_id  = c_h->pdt.n_ranges++;
 
 
     cuda_err_chk(cudaMemcpy(d_range_ptr, &rdt, sizeof(range_d_t<T>), cudaMemcpyHostToDevice));
-
+    printf("range_t::copy size: %d\n", sizeof(range_d_t<T>));
     c_h->add_range(this);
 
     rdt.cache = c_h->pdt;
     cuda_err_chk(cudaMemcpy(d_range_ptr, &rdt, sizeof(range_d_t<T>), cudaMemcpyHostToDevice));
-
+    printf("range_t::copy size: %d\n", sizeof(range_d_t<T>));
+    std::cout << "Finish Making Page ranges\n";
 }
 
 
@@ -1588,9 +1626,9 @@ uint64_t range_d_t<T>::acquire_page(const size_t pg, const uint32_t count, const
             st_new = pages[index].state.fetch_or(BUSY, simt::memory_order_acquire);
             // 代表该cache line没有被其他线程占用，不处于BUSY状态
             if ((st_new & BUSY) == 0) {
-                
+                // printf("read_io_cnt before find_slot: %lu\n", (unsigned long)read_io_cnt);
                 uint32_t page_trans = cache.find_slot(index, range_id, queue, read_io_cnt, evicted_p_array);
-                
+                // printf("read_io_cnt after find_slot: %lu\n", (unsigned long)read_io_cnt);
 	       	//fill in
                 //uint64_t tid = blockIdx.x * blockDim.x + threadIdx.x;
                 //uint32_t sm_id = get_smid();
@@ -1617,6 +1655,7 @@ uint64_t range_d_t<T>::acquire_page(const size_t pg, const uint32_t count, const
                 //     __nanosleep(100);
                 //miss_cnt.fetch_add(count, simt::memory_order_relaxed);
                 miss_cnt.fetch_add(count, simt::memory_order_relaxed);
+                read_cnt.fetch_add(1, simt::memory_order_relaxed);
                 //new_state = VALID;
                 if (write)
                     pages[index].state.fetch_or(DIRTY, simt::memory_order_relaxed);
@@ -1680,6 +1719,7 @@ __device__
 uint64_t range_d_t<T>::wb_cont_acquire_page(const size_t pg, const uint32_t count, const bool write, const uint32_t ctrl_, const uint32_t queue,
                                        uint32_t* wb_queue_counter,  uint32_t  wb_depth,  T* queue_ptr,
                                            uint32_t page_trans) {
+    printf("wb_cont_acquire_page\n");
     uint64_t index = pg;
     uint64_t ctrl = get_backing_ctrl(index);
     if (ctrl == ALL_CTRLS)
@@ -1695,6 +1735,7 @@ uint64_t range_d_t<T>::wb_cont_acquire_page(const size_t pg, const uint32_t coun
     pages[index].offset = page_trans;
 
     miss_cnt.fetch_add(count, simt::memory_order_relaxed);
+    read_cnt.fetch_add(1, simt::memory_order_relaxed);
 
     if (write)
         pages[index].state.fetch_or(DIRTY, simt::memory_order_relaxed);
@@ -1792,7 +1833,7 @@ uint64_t range_d_t<T>::wb_acquire_page(const size_t pg, const uint32_t count, co
                 pages[index].offset = page_trans;
               
                 miss_cnt.fetch_add(count, simt::memory_order_relaxed);
-
+                read_cnt.fetch_add(1, simt::memory_order_relaxed);
                 if (write)
                     pages[index].state.fetch_or(DIRTY, simt::memory_order_relaxed);
 
@@ -1912,6 +1953,7 @@ struct array_d_t {
             //bool memcpyflag;
             uint32_t count = 1;
             if (master == lane) {
+                printf("array_d_t::memcpy\n");
                 //std::pair<uint64_t, bool> base_memcpyflag;
                 base = r_->acquire_page(page, count, false, ctrl, queue);
                 base_master = base;
@@ -1956,6 +1998,7 @@ struct array_d_t {
     __device__
     void coalesce_page(const uint32_t lane, const uint32_t mask, const int64_t r, const uint64_t page, const uint64_t gaddr, const bool write,
                        uint32_t& eq_mask, int& master, uint32_t& count, uint64_t& base_master) const {
+        // printf("array_d_t::coalesce_page\n");
         uint32_t ctrl;
         uint32_t queue;
         // __ffs用于找到一个整数的最低有效位
@@ -1991,6 +2034,7 @@ struct array_d_t {
         // 获取具有相同gaddr值和相同this指针值的线程数量
         count = __popc(eq_mask);
         if (master == lane) {
+            // 
             //std::pair<uint64_t, bool> base_memcpyflag;
             base = r_->acquire_page(page, count, dirty, ctrl, queue);
             base_master = base;
@@ -2090,7 +2134,7 @@ struct array_d_t {
             uint64_t page = r_->get_page(i);
             uint64_t subindex = r_->get_subindex(i);
             uint64_t gaddr = r_->get_global_address(page);
-
+            printf("array_d_t::get_raw\n");
             coalesce_page(lane, mask, r, page, gaddr, false, eq_mask, master, count, base_master);
 
 
@@ -2145,7 +2189,7 @@ struct array_d_t {
     __device__
     void* acquire_page_(const size_t i, data_page_t*& page_, size_t& start, size_t& end, range_d_t<T>* r_, const size_t page) const {
         //uint32_t lane = lane_id();
-
+        // printf("array_d_t::acquire_page_\n");
 
 
         void* ret = nullptr;
@@ -2157,6 +2201,7 @@ struct array_d_t {
             page_cache_d_t* pc = &(r_->cache);
             uint32_t ctrl = 0;//pc->ctrl_counter->fetch_add(1, simt::memory_order_relaxed) % (pc->n_ctrls);
             uint32_t queue = get_smid() % (pc->d_ctrls[0]->n_qps);
+            printf("array_d_t::acquire_page_\n");
             uint64_t base_master = r_->acquire_page(page, 1, false, ctrl, queue);
             //coalesce_page(lane, mask, r, page, gaddr, false, eq_mask, master, count, base_master);
 
@@ -2174,6 +2219,7 @@ struct array_d_t {
     __forceinline__
     __device__
     void* acquire_page(const size_t i, data_page_t*& page_, size_t& start, size_t& end, int64_t& r) const {
+        // printf("array_d_t::acquire_page\n");
         uint32_t lane = lane_id();
         r = find_range(i);
         auto r_ = d_ranges+r;
@@ -2193,7 +2239,7 @@ struct array_d_t {
             uint64_t page = r_->get_page(i);
             uint64_t subindex = r_->get_subindex(i);
             uint64_t gaddr = r_->get_global_address(page);
-
+            // printf("array_d_t::acquire_page\n");
             coalesce_page(lane, mask, r, page, gaddr, false, eq_mask, master, count, base_master);
             page_ = &r_->pages[base_master];
 
@@ -2462,6 +2508,7 @@ struct array_d_t {
     __forceinline__
     __device__
     T seq_read(const size_t i) const {
+        printf("array_d_t::seq_read\n");
         // 这个函数的作用是获取当前线程在其所在的 warp 中的线程 ID，也就是 lane ID。
 	    uint32_t lane = lane_id();
         int64_t r = find_range(i);
@@ -2509,7 +2556,8 @@ struct array_d_t {
     __forceinline__
     __device__
     void pin_memory(const size_t i) const {
-	   uint32_t lane = lane_id();
+        printf("array_d_t::pin_memory\n");
+	    uint32_t lane = lane_id();
         int64_t r = find_range(i);
         auto r_ = d_ranges+r;
         T ret;
@@ -2573,6 +2621,7 @@ struct array_d_t {
     __forceinline__
     __device__
     void seq_write(const size_t i, const T val) const {
+        printf("array_d_t::seq_write\n");
         uint32_t lane = lane_id();
         int64_t r = find_range(i);
         auto r_ = d_ranges+r;
@@ -2685,6 +2734,7 @@ struct array_d_t {
             //bool memcpyflag;
             uint32_t count = __popc(eq_mask);
             if (master == lane) {
+                printf("array_d_t::AtomicAdd\n");
                 base = r_->acquire_page(page, count, true, ctrl, queue);
                 base_master = base;
                 //    //printf("++tid: %llu\tbase: %llu  memcpyflag_master:%llu\n", (unsigned long long) threadIdx.x, (unsigned long long) base_master, (unsigned long long) memcpyflag_master);
@@ -2733,13 +2783,14 @@ struct array_t {
         cuda_err_chk(cudaMemcpy(rdt.data(), adt.d_ranges, adt.n_ranges*sizeof(range_d_t<T>), cudaMemcpyDeviceToHost));
         for (size_t i = 0; i < adt.n_ranges; i++) {
 
-            std::cout << std::dec << "#READ IOs: "  << rdt[i].read_io_cnt 
+            std::cout << std::dec << "#Write: "  << rdt[i].read_io_cnt 
                                   << "\t#Accesses:" << rdt[i].access_cnt
                                   << "\t#Misses:"   << rdt[i].miss_cnt 
                                   << "\tMiss Rate:" << ((float)rdt[i].miss_cnt/rdt[i].access_cnt)
                                   << "\t#Hits: "    << rdt[i].hit_cnt 
                                   << "\tHit Rate:"  << ((float)rdt[i].hit_cnt/rdt[i].access_cnt) 
                                   << "\tCLSih'h'hze:"    << rdt[i].page_size 
+                                  << "\t#Reads: "   << rdt[i].read_cnt
 				  << "\tDebug Cnt: " << rdt[i].debug_cnt
                                   << std::endl;
             std::cout << "*********************************" << std::endl;
@@ -2753,6 +2804,7 @@ struct array_t {
             rdt[i].miss_cnt = 0;
             rdt[i].hit_cnt = 0;
 	        rdt[i].debug_cnt = 0;
+            rdt[i].read_cnt = 0;
         }
         cuda_err_chk(cudaMemcpy(adt.d_ranges, rdt.data(), adt.n_ranges*sizeof(range_d_t<T>), cudaMemcpyHostToDevice));
     }
@@ -2771,10 +2823,12 @@ struct array_t {
         
         
         d_array_buff = createBuffer(sizeof(array_d_t<T>), cudaDevice);
+        printf("array_t::alloc size: %lu\n", sizeof(array_d_t<T>));
         d_array_ptr = (array_d_t<T>*) d_array_buff.get();
 
         //d_ranges_buff = createBuffer(n_ranges * sizeof(range_t<T>*), cudaDevice);
         d_d_ranges_buff = createBuffer(adt.n_ranges * sizeof(range_d_t<T>), cudaDevice);
+        printf("array_t::alloc size: %lu\n", adt.n_ranges*sizeof(range_d_t<T>));
         adt.d_ranges = (range_d_t<T>*)d_d_ranges_buff.get();
         //d_ranges = (range_t<T>**) d_ranges_buff.get();
         for (size_t k = 0; k < adt.n_ranges; k++) {
@@ -2782,7 +2836,10 @@ struct array_t {
             cuda_err_chk(cudaMemcpy(adt.d_ranges+k, (ranges[k]->d_range_ptr), sizeof(range_d_t<T>), cudaMemcpyDeviceToDevice));
         }
 
+        printf("array_t::copy size: %lu\n", adt.n_ranges*sizeof(range_d_t<T>));
         cuda_err_chk(cudaMemcpy(d_array_ptr, &adt, sizeof(array_d_t<T>), cudaMemcpyHostToDevice));
+        printf("array_t::copy size: %lu\n", sizeof(array_d_t<T>));
+        std::cout << "Finish Making array\n";
     }
    
     
@@ -3121,6 +3178,7 @@ uint32_t page_cache_d_t::wb_find_slot_cpu_agg(uint64_t address, uint64_t range_i
 __forceinline__
 __device__
 uint32_t page_cache_d_t::find_slot(uint64_t address, uint64_t range_id, const uint32_t queue_, simt::atomic<uint64_t, simt::thread_scope_device>& access_cnt, uint64_t* evicted_p_array) {
+    // printf("page_cache.h    page_cache_d_t::find_slot\n");
     bool fail = true;
     uint64_t count = 0;
     uint64_t global_address =(uint64_t) ((address << n_ranges_bits) | range_id); //not elegant. but hack
@@ -3135,6 +3193,7 @@ uint32_t page_cache_d_t::find_slot(uint64_t address, uint64_t range_id, const ui
         bool lock = false;
         uint32_t v = this->cache_pages[page].page_take_lock.load(simt::memory_order_relaxed);
         if ( v == FREE ) {
+            // printf("page_cache.h    page_cache_d_t::find_slot    v == FREE\n");
     		lock = this->cache_pages[page].page_take_lock.compare_exchange_weak(v, LOCKED, simt::memory_order_acquire, simt::memory_order_relaxed);
             if ( lock ) {
                 this->cache_pages[page].page_translation = global_address;
@@ -3144,7 +3203,7 @@ uint32_t page_cache_d_t::find_slot(uint64_t address, uint64_t range_id, const ui
         }
         //assigned to someone and was able to take lock
         else if ( v == UNLOCKED ) {
-
+            // printf("page_cache.h    page_cache_d_t::find_slot    v == UNLOCKED\n");
             lock = this->cache_pages[page].page_take_lock.compare_exchange_weak(v, LOCKED, simt::memory_order_acquire, simt::memory_order_relaxed);
             if (lock) {
                 //uint32_t previous_address = this->cache_pages[page].page_translation;
@@ -3161,7 +3220,7 @@ uint32_t page_cache_d_t::find_slot(uint64_t address, uint64_t range_id, const ui
                 uint32_t cnt = expected_state & CNT_MASK;
                 uint32_t b = expected_state & BUSY;
  		//printf("cnt: %lu b: %lu\n", (unsigned long)cnt, (unsigned long)  b);
- 		if ((cnt == 0) && (b == 0) ) {
+ 		        if ((cnt == 0) && (b == 0) ) {
                     new_expected_state = this->ranges[previous_range][previous_address].state.fetch_or(BUSY, simt::memory_order_acquire);
                     if (((new_expected_state & BUSY ) == 0) ) {
                         //while ((new_expected_state & CNT_MASK ) != 0) new_expected_state = this->ranges[previous_range][previous_address].state.load(simt::memory_order_acquire);
@@ -3178,6 +3237,8 @@ uint32_t page_cache_d_t::find_slot(uint64_t address, uint64_t range_id, const ui
                                         Controller* c = this->d_ctrls[ctrl];
                                         uint32_t queue = queue_ % (c->n_qps);
                                         write_data(this, (c->d_qps)+queue, (index*this->n_blocks_per_page), this->n_blocks_per_page, page);
+                                        access_cnt.fetch_add(1, simt::memory_order_relaxed);
+                                        // printf("write dirty page to all ctrls\n");
                                     }
                                 }
                                 else {
@@ -3189,6 +3250,8 @@ uint32_t page_cache_d_t::find_slot(uint64_t address, uint64_t range_id, const ui
 
 
                                     write_data(this, (c->d_qps)+queue, (index*this->n_blocks_per_page), this->n_blocks_per_page, page);
+                                    access_cnt.fetch_add(1, simt::memory_order_relaxed);
+                                    // printf("write dirty data to ctrl\n");
                                 }
                             }
 
@@ -3215,6 +3278,7 @@ uint32_t page_cache_d_t::find_slot(uint64_t address, uint64_t range_id, const ui
                     //this->cache_pages[page].range_id = range_id;
 //                    this->page_translation[page] = global_address;
                     this->cache_pages[page].page_translation = global_address;
+                    // printf("get a slot whose page_translation: %llx\n", (unsigned long long) global_address);
                 }
                 //this->page_translation[page].store(global_address, simt::memory_order_release);
                 this->cache_pages[page].page_take_lock.store(UNLOCKED, simt::memory_order_release);
@@ -3241,7 +3305,7 @@ uint32_t page_cache_d_t::find_slot(uint64_t address, uint64_t range_id, const ui
 //            }
 //	   expected_state = 0;
 //	   new_expected_state = 0;
-
+        printf("failed to find slot\n");
 
         }
 
@@ -3346,7 +3410,7 @@ inline __device__ void read_data(page_cache_d_t* pc, QueuePair* qp, const uint64
     uint64_t prp2 = 0;
     if (pc->prps)
         prp2 = pc->prp2[pc_entry];
-    printf("tid: %llu\tstart_lba: %llu\tn_blocks: %llu\tprp1: %p\n", (unsigned long long) (threadIdx.x+blockIdx.x*blockDim.x), (unsigned long long) starting_lba, (unsigned long long) n_blocks, (void*) prp1);
+    //printf("tid: %llu\tstart_lba: %llu\tn_blocks: %llu\tprp1: %p\n", (unsigned long long) (threadIdx.x+blockIdx.x*blockDim.x), (unsigned long long) starting_lba, (unsigned long long) n_blocks, (void*) prp1);
     nvm_cmd_data_ptr(&cmd, prp1, prp2);
     nvm_cmd_rw_blks(&cmd, starting_lba, n_blocks);
     uint16_t sq_pos = sq_enqueue(&qp->sq, &cmd);
@@ -3390,7 +3454,7 @@ inline __device__ void write_data(page_cache_d_t* pc, QueuePair* qp, const uint6
     uint64_t prp2 = 0;
     if (pc->prps)
         prp2 = pc->prp2[pc_entry];
-    printf("tid: %llu\tstart_lba: %llu\tn_blocks: %llu\tprp1: %p\n", (unsigned long long) (threadIdx.x+blockIdx.x*blockDim.x), (unsigned long long) starting_lba, (unsigned long long) n_blocks, (void*) prp1);
+    // printf("tid: %llu\tstart_lba: %llu\tn_blocks: %llu\tprp1: %p\n", (unsigned long long) (threadIdx.x+blockIdx.x*blockDim.x), (unsigned long long) starting_lba, (unsigned long long) n_blocks, (void*) prp1);
     nvm_cmd_data_ptr(&cmd, prp1, prp2);
     nvm_cmd_rw_blks(&cmd, starting_lba, n_blocks);
     uint16_t sq_pos = sq_enqueue(&qp->sq, &cmd);
