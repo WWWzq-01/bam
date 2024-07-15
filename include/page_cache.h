@@ -452,7 +452,7 @@ struct bam_ptr {
     __host__ __device__
     T operator[](const size_t i) const {
     // printf("T bam_ptr::operator[]\n");
-	if ((i < start) || (i >= end)) {
+	    if ((i < start) || (i >= end)) {
 	   	T* tmpaddr =  update_page(i);
         }
         return addr[i-start];
@@ -1218,6 +1218,9 @@ struct range_d_t {
     simt::atomic<uint64_t, simt::thread_scope_device> read_io_cnt;
     simt::atomic<uint64_t, simt::thread_scope_device> read_cnt;
     simt::atomic<uint64_t, simt::thread_scope_device> acquire_cnt;
+    simt::atomic<uint64_t, simt::thread_scope_device> ar_coalesce_cnt;
+    simt::atomic<uint64_t, simt::thread_scope_device> ar_acquire_cnt;
+
 
     simt::atomic<uint64_t, simt::thread_scope_device> debug_cnt;
     uint64_t* evicted_p_array;
@@ -1336,6 +1339,8 @@ range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint6
     rdt.read_io_cnt = 0;
     rdt.read_cnt = 0;
     rdt.acquire_cnt = 0;
+    rdt.ar_coalesce_cnt =0;
+    rdt.ar_acquire_cnt = 0;
     rdt.index_start = is;
     rdt.count = count;
 
@@ -1590,6 +1595,7 @@ __device__
 uint64_t range_d_t<T>::acquire_page(const size_t pg, const uint32_t count, const bool write, const uint32_t ctrl_, const uint32_t queue) {
     uint64_t index = pg;
     access_cnt.fetch_add(count, simt::memory_order_relaxed);
+    acquire_cnt.fetch_add(1, simt::memory_order_relaxed);
     
     bool fail = true;
     unsigned int ns = 8;
@@ -1779,7 +1785,7 @@ uint64_t range_d_t<T>::wb_acquire_page(const size_t pg, const uint32_t count, co
                                        uint8_t time_step, uint32_t head_ptr) {
     uint64_t index = pg;
     access_cnt.fetch_add(count, simt::memory_order_relaxed);
-    
+
     bool fail = true;
     unsigned int ns = 8;
 
@@ -1896,6 +1902,9 @@ struct array_d_t {
     
     T* cpu_cache; 
     
+    // simt::atomic<uint64_t, simt::thread_scope_device> coalesce_page_cnt;
+    // simt::atomic<uint64_t, simt::thread_scope_device> ar_acquire_page_cnt;
+
     
 
     __forceinline__
@@ -1999,11 +2008,13 @@ struct array_d_t {
     void coalesce_page(const uint32_t lane, const uint32_t mask, const int64_t r, const uint64_t page, const uint64_t gaddr, const bool write,
                        uint32_t& eq_mask, int& master, uint32_t& count, uint64_t& base_master) const {
         // printf("array_d_t::coalesce_page\n");
+        // coalesce_page_cnt.fetch_add(1, simt::memory_order_relaxed);
         uint32_t ctrl;
         uint32_t queue;
         // __ffs用于找到一个整数的最低有效位
         uint32_t leader = __ffs(mask) - 1;
         auto r_ = d_ranges+r;
+        r_->ar_coalesce_cnt.fetch_add(1, simt::memory_order_relaxed);
         // 一个warp中选出一个leader线程，该线程负责选择ctrl和queue
         if (lane == leader) {
             page_cache_d_t* pc = &(r_->cache);
@@ -2190,7 +2201,7 @@ struct array_d_t {
     void* acquire_page_(const size_t i, data_page_t*& page_, size_t& start, size_t& end, range_d_t<T>* r_, const size_t page) const {
         //uint32_t lane = lane_id();
         // printf("array_d_t::acquire_page_\n");
-
+        // ar_acquire_page_cnt.fetch_add(1, simt::memory_order_relaxed);
 
         void* ret = nullptr;
         page_ = nullptr;
@@ -2220,10 +2231,11 @@ struct array_d_t {
     __device__
     void* acquire_page(const size_t i, data_page_t*& page_, size_t& start, size_t& end, int64_t& r) const {
         // printf("array_d_t::acquire_page\n");
+        // ar_acquire_page_cnt.fetch_add(1, simt::memory_order_relaxed);
         uint32_t lane = lane_id();
         r = find_range(i);
         auto r_ = d_ranges+r;
-
+        r_->ar_acquire_cnt.fetch_add(1, simt::memory_order_relaxed);
         void* ret = nullptr;
         page_ = nullptr;
         if (r != -1) {
@@ -2778,6 +2790,11 @@ struct array_t {
 
     void print_reset_stats(void) {
         std::vector<range_d_t<T>> rdt(adt.n_ranges);
+        // printf("array_t::coalesce_page: %d\n",adt.coalesce_page_cnt);
+        // printf("array_t::ar_acquire_page: %d\n",adt.ar_acquire_page_cnt);
+
+        // adt.coalesce_page_cnt = 0;
+        // adt.ar_acquire_page_cnt = 0;
         //range_d_t<T>* rdt = new range_d_t<T>[adt.n_ranges];
         //  adt.d_ranges的类型是range_d_t<T>* ，实际上就是一个range_d_t<T>的数组,相当于将这个数组拷贝到对应的vector中
         cuda_err_chk(cudaMemcpy(rdt.data(), adt.d_ranges, adt.n_ranges*sizeof(range_d_t<T>), cudaMemcpyDeviceToHost));
@@ -2791,7 +2808,10 @@ struct array_t {
                                   << "\tHit Rate:"  << ((float)rdt[i].hit_cnt/rdt[i].access_cnt) 
                                   << "\tCLSih'h'hze:"    << rdt[i].page_size 
                                   << "\t#Reads: "   << rdt[i].read_cnt
-				  << "\tDebug Cnt: " << rdt[i].debug_cnt
+                                  << "\t#Acquire_pgae: " << rdt[i].acquire_cnt
+                                  << "\t#Ar_acquire_cnt: " << rdt[i].ar_acquire_cnt
+                                  << "\t#arCoalesce_cnt: " << rdt[i].ar_coalesce_cnt
+				                  << "\tDebug Cnt: " << rdt[i].debug_cnt
                                   << std::endl;
             std::cout << "*********************************" << std::endl;
 //	    for (size_t j = 0; j < rdt[i].read_io_cnt; j++){
@@ -2805,6 +2825,9 @@ struct array_t {
             rdt[i].hit_cnt = 0;
 	        rdt[i].debug_cnt = 0;
             rdt[i].read_cnt = 0;
+            rdt[i].acquire_cnt = 0;
+            rdt[i].ar_coalesce_cnt = 0;
+            rdt[i].ar_acquire_cnt = 0;
         }
         cuda_err_chk(cudaMemcpy(adt.d_ranges, rdt.data(), adt.n_ranges*sizeof(range_d_t<T>), cudaMemcpyHostToDevice));
     }
@@ -2820,6 +2843,9 @@ struct array_t {
         adt.queue_ptr = q_ptr;
         adt.wb_id_array = wb_id;
         adt.q_depth =q_dep;
+
+        // adt.ar_acquire_page_cnt = 0;
+        // adt.coalesce_page_cnt = 0;
         
         
         d_array_buff = createBuffer(sizeof(array_d_t<T>), cudaDevice);
@@ -3305,7 +3331,7 @@ uint32_t page_cache_d_t::find_slot(uint64_t address, uint64_t range_id, const ui
 //            }
 //	   expected_state = 0;
 //	   new_expected_state = 0;
-        printf("failed to find slot\n");
+        // printf("failed to find slot\n");
 
         }
 
