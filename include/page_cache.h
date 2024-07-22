@@ -949,13 +949,13 @@ struct page_cache_t {
         h_ranges_page_starts[range->rdt.range_id] = range->rdt.page_start;
         h_ranges_dists[range->rdt.range_id] = range->rdt.dist;
         cuda_err_chk(cudaMemcpy(pdt.ranges_page_starts, h_ranges_page_starts, pdt.n_ranges * sizeof(uint64_t), cudaMemcpyHostToDevice));
-        printf("range_t::copy size: %d\n", pdt.n_ranges * sizeof(uint64_t));
+        printf("range_t::copy size: %lu\n", pdt.n_ranges * sizeof(uint64_t));
         cuda_err_chk(cudaMemcpy(pdt.ranges, h_ranges, pdt.n_ranges* sizeof(pages_t), cudaMemcpyHostToDevice));
-        printf("range_t::copy size: %d\n", pdt.n_ranges* sizeof(pages_t));
+        printf("range_t::copy size: %lu\n", pdt.n_ranges* sizeof(pages_t));
         cuda_err_chk(cudaMemcpy(pdt.ranges_dists, h_ranges_dists, pdt.n_ranges* sizeof(data_dist_t), cudaMemcpyHostToDevice));
-        printf("range_t::copy size: %d\n", pdt.n_ranges* sizeof(data_dist_t));
+        printf("range_t::copy size: %lu\n", pdt.n_ranges* sizeof(data_dist_t));
         cuda_err_chk(cudaMemcpy(d_pc_ptr, &pdt, sizeof(page_cache_d_t), cudaMemcpyHostToDevice));
-        printf("range_t::copy size: %d\n", sizeof(page_cache_d_t));
+        printf("range_t::copy size: %lu\n", sizeof(page_cache_d_t));
 
     }
 
@@ -989,7 +989,7 @@ struct page_cache_t {
         q_lock_buf = createBuffer(sizeof(simt::atomic<uint64_t, simt::thread_scope_device>), cudaDevice);
         extra_reads_buf = createBuffer(sizeof(simt::atomic<uint64_t, simt::thread_scope_device>), cudaDevice);
 
-        printf("page_cache_t::alloc size: %d\n", 5*sizeof(simt::atomic<uint64_t, simt::thread_scope_device>));
+        printf("page_cache_t::alloc size: %lu\n", 5*sizeof(simt::atomic<uint64_t, simt::thread_scope_device>));
         // 智能指针的get用于获取指向的原始指针
         pdt.ctrl_counter = (simt::atomic<uint64_t, simt::thread_scope_device>*)ctrl_counter_buf.get();
         pdt.page_size = ps;
@@ -1003,7 +1003,7 @@ struct page_cache_t {
         pdt.n_pages_minus_1 = np - 1;
         pdt.n_ctrls = ctrls.size();
         d_ctrls_buff = createBuffer(pdt.n_ctrls * sizeof(Controller*), cudaDevice);
-        printf("page_cache_t::alloc size: %d\n", pdt.n_ctrls * sizeof(Controller*));
+        printf("page_cache_t::alloc size: %lu\n", pdt.n_ctrls * sizeof(Controller*));
         // d_ctrls对应设备的ctrls
         pdt.d_ctrls = (Controller**) d_ctrls_buff.get();
         pdt.n_blocks_per_page = (ps/ctrl.blk_size);
@@ -1013,7 +1013,7 @@ struct page_cache_t {
         for (size_t k = 0; k < pdt.n_ctrls; k++)
             // 将host上的ctrl指针复制到device上
             cuda_err_chk(cudaMemcpy(pdt.d_ctrls+k, &(ctrls[k]->d_ctrl_ptr), sizeof(Controller*), cudaMemcpyHostToDevice));
-        printf("page_cache_t::copy size: %d\n", pdt.n_ctrls * sizeof(Controller*));
+        printf("page_cache_t::copy size: %lu\n", pdt.n_ctrls * sizeof(Controller*));
 
         pdt.range_cap = max_range;
         // 初始化为0，之后通过add_range函数添加
@@ -1025,7 +1025,7 @@ struct page_cache_t {
 
         pdt.page_size_log = std::log2(ps);
         ranges_buf = createBuffer(max_range * sizeof(pages_t), cudaDevice);
-        printf("page_cache_t::alloc size: %d\n", max_range * sizeof(pages_t));
+        printf("page_cache_t::alloc size: %lu\n", max_range * sizeof(pages_t));
         pdt.ranges = (pages_t*)ranges_buf.get();
         h_ranges = new pages_t[max_range];
 
@@ -1033,15 +1033,15 @@ struct page_cache_t {
         std::memset(h_ranges_page_starts, 0, max_range * sizeof(uint64_t));
 
         cache_pages_buf = createBuffer(np * sizeof(cache_page_t), cudaDevice);
-        printf("page_cache_t::alloc size: %d\n", np * sizeof(cache_page_t));
+        printf("page_cache_t::alloc size: %lu\n", np * sizeof(cache_page_t));
         pdt.cache_pages = (cache_page_t*)cache_pages_buf.get();
 
         ranges_page_starts_buf = createBuffer(max_range * sizeof(uint64_t), cudaDevice);
-        printf("page_cache_t::alloc size: %d\n", max_range * sizeof(uint64_t));
+        printf("page_cache_t::alloc size: %lu\n", max_range * sizeof(uint64_t));
         pdt.ranges_page_starts = (uint64_t*) ranges_page_starts_buf.get();
 
         page_ticket_buf = createBuffer(1 * sizeof(padded_struct_pc), cudaDevice);
-        printf("page_cache_t::alloc size: %d\n", 1 * sizeof(padded_struct_pc));
+        printf("page_cache_t::alloc size: %lu\n", 1 * sizeof(padded_struct_pc));
         pdt.page_ticket =  (padded_struct_pc*)page_ticket_buf.get();
         //std::vector<padded_struct_pc> tps(np, FREE);
         cache_page_t* tps = new cache_page_t[np];
@@ -1055,17 +1055,17 @@ struct page_cache_t {
             }
         }
         cuda_err_chk(cudaMemcpy(pdt.cache_pages, tps, np*sizeof(cache_page_t), cudaMemcpyHostToDevice));
-        printf("page_cache_t::copy size: %d\n", np*sizeof(cache_page_t));
+        printf("page_cache_t::copy size: %lu\n", np*sizeof(cache_page_t));
         delete tps;
 
         ranges_dists_buf = createBuffer(max_range * sizeof(data_dist_t), cudaDevice);
-        printf("page_cache_t::alloc size: %d\n", max_range * sizeof(data_dist_t));
+        printf("page_cache_t::alloc size: %lu\n", max_range * sizeof(data_dist_t));
         pdt.ranges_dists = (data_dist_t*)ranges_dists_buf.get();
         h_ranges_dists = new data_dist_t[max_range];
 
         uint64_t cache_size = ps*np;
         this->pages_dma = createDma(ctrl.ctrl, NVM_PAGE_ALIGN(cache_size, 1UL << 16), cudaDevice);
-        printf("page_cache_t::alloc size: %d\n", NVM_PAGE_ALIGN(cache_size, 1UL << 16));
+        printf("page_cache_t::alloc size: %lu\n", NVM_PAGE_ALIGN(cache_size, 1UL << 16));
         pdt.base_addr = (uint8_t*) this->pages_dma.get()->vaddr;
         std::cout << "pages_dma: " << std::hex << this->pages_dma.get()->vaddr << "\t" << this->pages_dma.get()->ioaddrs[0] << std::endl;
         std::cout << "HEREN\n";
@@ -1078,7 +1078,7 @@ struct page_cache_t {
             // 计算每个ssd页中有多少个ps大小的页
             uint64_t how_many_in_one = ctrl.ctrl->page_size/ps;
             this->prp1_buf = createBuffer(np * sizeof(uint64_t), cudaDevice);
-            printf("page_cache_t::alloc size: %d\n", np * sizeof(uint64_t));
+            printf("page_cache_t::alloc size: %lu\n", np * sizeof(uint64_t));
             pdt.prp1 = (uint64_t*) this->prp1_buf.get();
 
 
@@ -1096,7 +1096,7 @@ struct page_cache_t {
                 }
             }
             cuda_err_chk(cudaMemcpy(pdt.prp1, temp, np * sizeof(uint64_t), cudaMemcpyHostToDevice));
-            printf("page_cache_t::copy size: %d\n", np * sizeof(uint64_t));
+            printf("page_cache_t::copy size: %lu\n", np * sizeof(uint64_t));
             delete temp;
             //std::cout << "HERE1\n";
             //free(temp);
@@ -1106,10 +1106,10 @@ struct page_cache_t {
         // 两个物理页对应一个page cache中的page
         else if ((ps > this->pages_dma.get()->page_size) && (ps <= (this->pages_dma.get()->page_size * 2))) {
             this->prp1_buf = createBuffer(np * sizeof(uint64_t), cudaDevice);
-            printf("page_cache_t::alloc size: %d\n", np * sizeof(uint64_t));
+            printf("page_cache_t::alloc size: %lu\n", np * sizeof(uint64_t));
             pdt.prp1 = (uint64_t*) this->prp1_buf.get();
             this->prp2_buf = createBuffer(np * sizeof(uint64_t), cudaDevice);
-            printf("page_cache_t::alloc size: %d\n", np * sizeof(uint64_t));
+            printf("page_cache_t::alloc size: %lu\n", np * sizeof(uint64_t));
             pdt.prp2 = (uint64_t*) this->prp2_buf.get();
             // 怀疑这个数组的长度不对，应该是np
             uint64_t* temp1 = new uint64_t[np * sizeof(uint64_t)];
@@ -1121,9 +1121,9 @@ struct page_cache_t {
                 temp2[i] = ((uint64_t)this->pages_dma.get()->ioaddrs[i*2+1]);
             }
             cuda_err_chk(cudaMemcpy(pdt.prp1, temp1, np * sizeof(uint64_t), cudaMemcpyHostToDevice));
-            printf("page_cache_t::copy size: %d\n", np * sizeof(uint64_t));
+            printf("page_cache_t::copy size: %lu\n", np * sizeof(uint64_t));
             cuda_err_chk(cudaMemcpy(pdt.prp2, temp2, np * sizeof(uint64_t), cudaMemcpyHostToDevice));
-            printf("page_cache_t::copy size: %d\n", np * sizeof(uint64_t));
+            printf("page_cache_t::copy size: %lu\n", np * sizeof(uint64_t));
 
             delete temp1;
             delete temp2;
@@ -1134,14 +1134,14 @@ struct page_cache_t {
             // prp_list_dma设置的是ctrl.ctrl->page_size  * np;
             // 为什么需要prp_list_dma呢
             this->prp1_buf = createBuffer(np * sizeof(uint64_t), cudaDevice);
-            printf("page_cache_t::alloc size: %d\n", np * sizeof(uint64_t));
+            printf("page_cache_t::alloc size: %lu\n", np * sizeof(uint64_t));
             pdt.prp1 = (uint64_t*) this->prp1_buf.get();
 
             uint32_t prp_list_size =  ctrl.ctrl->page_size  * np;
             this->prp_list_dma = createDma(ctrl.ctrl, NVM_PAGE_ALIGN(prp_list_size, 1UL << 16), cudaDevice);
-            printf("page_cache_t::alloc size: %d\n", prp_list_size);
+            printf("page_cache_t::alloc size: %lu\n", prp_list_size);
             this->prp2_buf = createBuffer(np * sizeof(uint64_t), cudaDevice);
-            printf("page_cache_t::alloc size: %d\n", np * sizeof(uint64_t));
+            printf("page_cache_t::alloc size: %lu\n", np * sizeof(uint64_t));
             pdt.prp2 = (uint64_t*) this->prp2_buf.get();
             // temp1,2的长度应该是np，temp3的长度应该是（how_many_in_one-1）*np
             uint64_t* temp1 = new uint64_t[np * sizeof(uint64_t)];
@@ -1163,11 +1163,11 @@ struct page_cache_t {
 
             std::cout << "Done creating PRP\n";
             cuda_err_chk(cudaMemcpy(pdt.prp1, temp1, np * sizeof(uint64_t), cudaMemcpyHostToDevice));
-            printf("page_cache_t::copy size: %d\n", np * sizeof(uint64_t));
+            printf("page_cache_t::copy size: %lu\n", np * sizeof(uint64_t));
             cuda_err_chk(cudaMemcpy(pdt.prp2, temp2, np * sizeof(uint64_t), cudaMemcpyHostToDevice));
-            printf("page_cache_t::copy size: %d\n", np * sizeof(uint64_t));
+            printf("page_cache_t::copy size: %lu\n", np * sizeof(uint64_t));
             cuda_err_chk(cudaMemcpy(this->prp_list_dma.get()->vaddr, temp3, prp_list_size, cudaMemcpyHostToDevice));
-            printf("page_cache_t::copy size: %d\n", prp_list_size);
+            printf("page_cache_t::copy size: %lu\n", prp_list_size);
 
             delete temp1;
             delete temp2;
@@ -1177,10 +1177,10 @@ struct page_cache_t {
 
 
         pc_buff = createBuffer(sizeof(page_cache_d_t), cudaDevice);
-        printf("page_cache_t::alloc size: %d\n", sizeof(page_cache_d_t));
+        printf("page_cache_t::alloc size: %lu\n", sizeof(page_cache_d_t));
         d_pc_ptr = (page_cache_d_t*)pc_buff.get();
         cuda_err_chk(cudaMemcpy(d_pc_ptr, &pdt, sizeof(page_cache_d_t), cudaMemcpyHostToDevice));
-        printf("page_cache_t::copy size: %d\n", sizeof(page_cache_d_t));
+        printf("page_cache_t::copy size: %lu\n", sizeof(page_cache_d_t));
         std::cout << "Finish Making Page Cache\n";
 
     }
@@ -1355,7 +1355,7 @@ range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint6
     rdt.n_elems_per_page = rdt.page_size / sizeof(T);
     cache = (page_cache_d_t*) c_h->d_pc_ptr;
     pages_buff = createBuffer(s * sizeof(data_page_t), cudaDevice);
-    printf("range_t::alloc size: %d\n", s * sizeof(data_page_t));
+    printf("range_t::alloc size: %lu\n", s * sizeof(data_page_t));
     rdt.pages = (pages_t) pages_buff.get();
     //std::vector<padded_struct_pc> ts(s, INVALID);
     data_page_t* ts = new data_page_t[s];
@@ -1370,10 +1370,11 @@ range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint6
     uint64_t* evicted_p_array; 
 //    cuda_err_chk(cudaMallocManaged(&evicted_p_array, sizeof(uint64_t) * 700000));
 //    printf("e p array:%p\n", evicted_p_array);
+    // FIXME: don't use evicted_p_array
     rdt.evicted_p_array=evicted_p_array;
     cuda_err_chk(cudaMemcpy(rdt.pages//_states
                             , ts, s * sizeof(data_page_t), cudaMemcpyHostToDevice));
-    printf("range_t::copy size: %d\n", s * sizeof(data_page_t));
+    printf("range_t::copy size: %lu\n", s * sizeof(data_page_t));
     delete ts;
 
 
@@ -1383,18 +1384,18 @@ range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint6
     //page_addresses = (padded_struct_pc*) page_addresses_buff.get();
 
     range_buff = createBuffer(sizeof(range_d_t<T>), cudaDevice);
-    printf("range_t::alloc size: %d\n", sizeof(range_d_t<T>));
+    printf("range_t::alloc size: %lu\n", sizeof(range_d_t<T>));
     d_range_ptr = (range_d_t<T>*)range_buff.get();
     //rdt.range_id  = c_h->pdt.n_ranges++;
 
 
     cuda_err_chk(cudaMemcpy(d_range_ptr, &rdt, sizeof(range_d_t<T>), cudaMemcpyHostToDevice));
-    printf("range_t::copy size: %d\n", sizeof(range_d_t<T>));
+    printf("range_t::copy size: %lu\n", sizeof(range_d_t<T>));
     c_h->add_range(this);
 
     rdt.cache = c_h->pdt;
     cuda_err_chk(cudaMemcpy(d_range_ptr, &rdt, sizeof(range_d_t<T>), cudaMemcpyHostToDevice));
-    printf("range_t::copy size: %d\n", sizeof(range_d_t<T>));
+    printf("range_t::copy size: %lu\n", sizeof(range_d_t<T>));
     std::cout << "Finish Making Page ranges\n";
 }
 
@@ -2621,7 +2622,7 @@ struct array_d_t {
             uint64_t page = r_->get_page(i);
             uint64_t subindex = r_->get_subindex(i);
             uint64_t gaddr = r_->get_global_address(page);
-
+        // FIXME: variable "master" is used before its value is set
 	    if (master == lane)  
 		 r_->release_page(page, count); 
 
