@@ -2489,6 +2489,7 @@ struct array_d_t {
     __forceinline__
     __device__
     void release_page(data_page_t* page_, const int64_t r, const size_t i) const {
+        //actually page_ is define but not used
         uint32_t lane = lane_id();
         auto r_ = d_ranges+r;
 
