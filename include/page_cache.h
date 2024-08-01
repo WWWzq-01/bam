@@ -428,10 +428,10 @@ struct bam_ptr {
     __host__ __device__
     T* update_page(const size_t i) {
 
-    fini(); //destructor
-    addr = (T*) array->acquire_page(i, page, start, end, range_id);
+        fini(); //destructor
+        addr = (T*) array->acquire_page(i, page, start, end, range_id);
 
-     return addr;
+        return addr;
     }
 
 
@@ -2006,8 +2006,8 @@ struct array_d_t {
 
     __forceinline__
     __device__
-    void coalesce_page(const uint32_t lane, const uint32_t mask, const int64_t r, const uint64_t page, const uint64_t gaddr, const bool write,
-                       uint32_t& eq_mask, int& master, uint32_t& count, uint64_t& base_master) const {
+    void coalesce_page(const uint32_t lane, const uint32_t mask, const int64_t r, const uint64_t page, const uint64_t gaddr,
+                        const bool write,uint32_t& eq_mask, int& master, uint32_t& count, uint64_t& base_master) const {
         // printf("array_d_t::coalesce_page\n");
         // coalesce_page_cnt.fetch_add(1, simt::memory_order_relaxed);
         uint32_t ctrl;
@@ -2497,6 +2497,7 @@ struct array_d_t {
 #ifndef __CUDACC__
             uint32_t mask = 1;
 #else
+            // __activemask() 函数返回当前 warp 中活动线程的掩码。
             uint32_t mask = __activemask();
 #endif
             uint32_t eq_mask;
@@ -2505,7 +2506,7 @@ struct array_d_t {
             uint64_t page = r_->get_page(i);
             uint64_t gaddr = r_->get_global_address(page);
 
-            uint32_t active_cnt = __popc(mask);
+            // uint32_t active_cnt = __popc(mask);
             eq_mask = __match_any_sync(mask, gaddr);
             eq_mask &= __match_any_sync(mask, (uint64_t)this);
             master = __ffs(eq_mask) - 1;
