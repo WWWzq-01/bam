@@ -2834,7 +2834,9 @@ struct array_t {
         cuda_err_chk(cudaMemcpy(adt.d_ranges, rdt.data(), adt.n_ranges*sizeof(range_d_t<T>), cudaMemcpyHostToDevice));
     }
 
-    array_t(const uint64_t num_elems, const uint64_t disk_start_offset, const std::vector<range_t<T>*>& ranges, uint32_t cudaDevice, uint32_t* q_counter = nullptr, uint32_t wb_dep = 128, uint32_t q_dep = 128, uint32_t* wb_id = nullptr, T* q_ptr=nullptr) {
+    array_t(const uint64_t num_elems, const uint64_t disk_start_offset, const std::vector<range_t<T>*>& ranges, 
+            uint32_t cudaDevice, uint32_t* q_counter = nullptr, uint32_t wb_dep = 128, 
+            uint32_t q_dep = 128, uint32_t* wb_id = nullptr, T* q_ptr=nullptr) {
         adt.n_elems = num_elems;
         adt.start_offset = disk_start_offset;
         adt.n_ranges = ranges.size();
