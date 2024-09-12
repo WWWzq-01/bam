@@ -1225,6 +1225,7 @@ struct range_d_t {
     simt::atomic<uint64_t, simt::thread_scope_device> debug_cnt;
     uint64_t* evicted_p_array;
 
+    uint64_t* page_access_count;
     pages_t pages;
     //padded_struct_pc* page_addresses;
     //uint32_t* page_addresses;
@@ -1321,6 +1322,7 @@ struct range_t {
 
     BufferPtr range_buff;
 
+    BufferPtr pages_count_buff; 
 
 
     range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint64_t pso, uint64_t p_size, page_cache_t* c_h, uint32_t cudaDevice, data_dist_t dist = REPLICATE);
@@ -1351,12 +1353,19 @@ range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint6
     rdt.page_size = c_h->pdt.page_size;
     rdt.page_start_offset = pso;
     rdt.dist = dist;
+
+
     size_t s = pc;//(rdt.page_end-rdt.page_start);//*page_size / c_h->page_size;
     rdt.n_elems_per_page = rdt.page_size / sizeof(T);
     cache = (page_cache_d_t*) c_h->d_pc_ptr;
     pages_buff = createBuffer(s * sizeof(data_page_t), cudaDevice);
     printf("range_t::alloc size: %lu\n", s * sizeof(data_page_t));
     rdt.pages = (pages_t) pages_buff.get();
+
+    pages_count_buff = createBuffer(s * sizeof(uint64_t), cudaDevice);
+    rdt.page_access_count = (uint64_t*) pages_count_buff.get();
+    cuda_err_chk(cudaMemset(rdt.page_access_count, 0, s * sizeof(uint64_t)));
+
     //std::vector<padded_struct_pc> ts(s, INVALID);
     data_page_t* ts = new data_page_t[s];
     for (size_t i = 0; i < s; i++) {
@@ -2046,7 +2055,8 @@ struct array_d_t {
         // 获取具有相同gaddr值和相同this指针值的线程数量
         count = __popc(eq_mask);
         if (master == lane) {
-            // 
+            //
+            atomicAdd((unsigned long long * )(&r_->page_access_count[page]),1);
             //std::pair<uint64_t, bool> base_memcpyflag;
             base = r_->acquire_page(page, count, dirty, ctrl, queue);
             base_master = base;
@@ -2250,6 +2260,7 @@ struct array_d_t {
             uint64_t base_master;
             uint32_t count;
             uint64_t page = r_->get_page(i);
+            // atomicAdd((unsigned long long * )(&r_->page_access_count[page]),1);
             uint64_t subindex = r_->get_subindex(i);
             uint64_t gaddr = r_->get_global_address(page);
             // printf("array_d_t::acquire_page\n");
@@ -2801,7 +2812,16 @@ struct array_t {
         //range_d_t<T>* rdt = new range_d_t<T>[adt.n_ranges];
         //  adt.d_ranges的类型是range_d_t<T>* ，实际上就是一个range_d_t<T>的数组,相当于将这个数组拷贝到对应的vector中
         cuda_err_chk(cudaMemcpy(rdt.data(), adt.d_ranges, adt.n_ranges*sizeof(range_d_t<T>), cudaMemcpyDeviceToHost));
+        uint64_t *page_access_cnt;
         for (size_t i = 0; i < adt.n_ranges; i++) {
+            page_access_cnt = new uint64_t[rdt[i].page_count];
+            cuda_err_chk(cudaMemcpy(page_access_cnt, rdt[i].page_access_count, rdt[0].page_count*sizeof(uint64_t), cudaMemcpyDeviceToHost));
+            int redundant = 0;
+            for (size_t j = 0; j < rdt[i].page_count; j++) {
+                if (page_access_cnt[j] > 1) {
+                    redundant++;
+                }
+            }
 
             std::cout << std::dec << "#Write: "  << rdt[i].read_io_cnt 
                                   << "\t#Accesses:" << rdt[i].access_cnt
@@ -2815,13 +2835,14 @@ struct array_t {
                                   << "\t#Ar_acquire_cnt: " << rdt[i].ar_acquire_cnt
                                   << "\t#arCoalesce_cnt: " << rdt[i].ar_coalesce_cnt
 				                  << "\tDebug Cnt: " << rdt[i].debug_cnt
+                                  << "\tRedundant: " << redundant
                                   << std::endl;
             std::cout << "*********************************" << std::endl;
 //	    for (size_t j = 0; j < rdt[i].read_io_cnt; j++){
 //		std::cout << "evicted: " << rdt[i].evicted_p_array[j] << std::endl;
 
 //	    }
-	
+            cuda_err_chk(cudaMemset(rdt[i].page_access_count, 0, rdt[i].page_count*sizeof(uint64_t)));
             rdt[i].read_io_cnt = 0;
             rdt[i].access_cnt = 0;
             rdt[i].miss_cnt = 0;
@@ -2831,6 +2852,8 @@ struct array_t {
             rdt[i].acquire_cnt = 0;
             rdt[i].ar_coalesce_cnt = 0;
             rdt[i].ar_acquire_cnt = 0;
+
+            delete[] page_access_cnt;
         }
         cuda_err_chk(cudaMemcpy(adt.d_ranges, rdt.data(), adt.n_ranges*sizeof(range_d_t<T>), cudaMemcpyHostToDevice));
     }
