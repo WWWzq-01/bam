@@ -1221,6 +1221,9 @@ struct range_d_t {
     simt::atomic<uint64_t, simt::thread_scope_device> ar_coalesce_cnt;
     simt::atomic<uint64_t, simt::thread_scope_device> ar_acquire_cnt;
 
+    uint64_t* iocnt;
+    uint64_t* feature_id;
+
 
     simt::atomic<uint64_t, simt::thread_scope_device> debug_cnt;
     uint64_t* evicted_p_array;
@@ -1319,6 +1322,9 @@ struct range_t {
     BufferPtr pages_buff;
     //BufferPtr page_addresses_buff;
 
+    BufferPtr iocnt_buff;
+    BufferPtr feature_id_buff;
+
     BufferPtr range_buff;
 
 
@@ -1356,7 +1362,14 @@ range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint6
     cache = (page_cache_d_t*) c_h->d_pc_ptr;
     pages_buff = createBuffer(s * sizeof(data_page_t), cudaDevice);
     printf("range_t::alloc size: %lu\n", s * sizeof(data_page_t));
+    iocnt_buff = createBuffer(s * sizeof(uint64_t), cudaDevice);
+    printf("range_t::alloc size: %lu\n", s * sizeof(uint64_t));
+    int bs = 1024*5*10*10;
+    feature_id_buff = createBuffer(bs * sizeof(uint64_t), cudaDevice);
+    printf("range_t::alloc size: %lu\n", bs * sizeof(uint64_t));
     rdt.pages = (pages_t) pages_buff.get();
+    rdt.iocnt = (uint64_t*) iocnt_buff.get();
+    rdt.feature_id = (uint64_t*) feature_id_buff.get(); 
     //std::vector<padded_struct_pc> ts(s, INVALID);
     data_page_t* ts = new data_page_t[s];
     for (size_t i = 0; i < s; i++) {
@@ -1366,6 +1379,12 @@ range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint6
         ts[i].prefetch_count=0;
         ts[i].prefetch_counter=0;
     }
+    uint64_t* iocnt_temp = new uint64_t[s];
+    uint64_t* feature_id_temp = new uint64_t[s];
+    for (size_t i = 0; i < s; i++) {
+        iocnt_temp[i] = 0;
+        feature_id_temp[i] = 0;
+    }
     ////printf("S value: %llu\n", (unsigned long long)s);
     uint64_t* evicted_p_array; 
 //    cuda_err_chk(cudaMallocManaged(&evicted_p_array, sizeof(uint64_t) * 700000));
@@ -1374,8 +1393,12 @@ range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint6
     rdt.evicted_p_array=evicted_p_array;
     cuda_err_chk(cudaMemcpy(rdt.pages//_states
                             , ts, s * sizeof(data_page_t), cudaMemcpyHostToDevice));
+    cuda_err_chk(cudaMemcpy(rdt.iocnt, iocnt_temp, s * sizeof(uint64_t), cudaMemcpyHostToDevice));
+    cuda_err_chk(cudaMemcpy(rdt.feature_id, feature_id_temp, s * sizeof(uint64_t), cudaMemcpyHostToDevice));
     printf("range_t::copy size: %lu\n", s * sizeof(data_page_t));
     delete ts;
+    delete iocnt_temp;
+    delete feature_id_temp;
 
 
     //page_addresses_buff = createBuffer(s * sizeof(uint32_t), cudaDevice);
