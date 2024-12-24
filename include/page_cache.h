@@ -1211,6 +1211,7 @@ struct range_d_t {
     size_t n_elems_per_page;
     data_dist_t dist;
     uint8_t* src;
+    uint64_t num_nodes;
 
     simt::atomic<uint64_t, simt::thread_scope_device> access_cnt;
     simt::atomic<uint64_t, simt::thread_scope_device> miss_cnt;
@@ -1222,7 +1223,6 @@ struct range_d_t {
     simt::atomic<uint64_t, simt::thread_scope_device> ar_acquire_cnt;
 
     uint64_t* iocnt;
-    uint64_t* feature_id;
 
 
     simt::atomic<uint64_t, simt::thread_scope_device> debug_cnt;
@@ -1261,7 +1261,7 @@ struct range_d_t {
     void release_page(const size_t pg, const uint32_t count) const;
     __forceinline__
     __device__
-    uint64_t acquire_page(const size_t pg, const uint32_t count, const bool write, const uint32_t ctrl, const uint32_t queue);
+    uint64_t acquire_page(const size_t pg, const uint32_t count, const bool write, const uint32_t ctrl, const uint32_t queue,uint64_t feature_id = 0);
     __forceinline__
     __device__
     uint64_t wb_acquire_page(const size_t pg, const uint32_t count, const bool write, const uint32_t ctrl, const uint32_t queue,
@@ -1323,20 +1323,20 @@ struct range_t {
     //BufferPtr page_addresses_buff;
 
     BufferPtr iocnt_buff;
-    BufferPtr feature_id_buff;
+
 
     BufferPtr range_buff;
 
 
 
-    range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint64_t pso, uint64_t p_size, page_cache_t* c_h, uint32_t cudaDevice, data_dist_t dist = REPLICATE);
+    range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint64_t pso, uint64_t p_size, page_cache_t* c_h, uint32_t cudaDevice, data_dist_t dist = REPLICATE,uint64_t num_nodes = 100000);
 
 
 
 };
 
 template <typename T>
-range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint64_t pso, uint64_t p_size, page_cache_t* c_h, uint32_t cudaDevice, data_dist_t dist) {
+range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint64_t pso, uint64_t p_size, page_cache_t* c_h, uint32_t cudaDevice, data_dist_t dist,uint64_t num_nodes) {
     // p_size 实际上没有被用到
     
     rdt.access_cnt = 0;
@@ -1349,6 +1349,7 @@ range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint6
     rdt.ar_acquire_cnt = 0;
     rdt.index_start = is;
     rdt.count = count;
+    rdt.num_nodes = num_nodes;
 
     rdt.debug_cnt = 0;
     //range_id = (c_h->range_count)++;
@@ -1363,13 +1364,11 @@ range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint6
     pages_buff = createBuffer(s * sizeof(data_page_t), cudaDevice);
     printf("range_t::alloc size: %lu\n", s * sizeof(data_page_t));
     iocnt_buff = createBuffer(s * sizeof(uint64_t), cudaDevice);
-    printf("range_t::alloc size: %lu\n", s * sizeof(uint64_t));
-    int bs = 1024*5*10*10;
-    feature_id_buff = createBuffer(bs * sizeof(uint64_t), cudaDevice);
-    printf("range_t::alloc size: %lu\n", bs * sizeof(uint64_t));
+    printf("range_t::alloc size: %lu\n", num_nodes * sizeof(uint64_t));
+    int bs = 1024*5*5*10;
+
     rdt.pages = (pages_t) pages_buff.get();
     rdt.iocnt = (uint64_t*) iocnt_buff.get();
-    rdt.feature_id = (uint64_t*) feature_id_buff.get(); 
     //std::vector<padded_struct_pc> ts(s, INVALID);
     data_page_t* ts = new data_page_t[s];
     for (size_t i = 0; i < s; i++) {
@@ -1380,10 +1379,8 @@ range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint6
         ts[i].prefetch_counter=0;
     }
     uint64_t* iocnt_temp = new uint64_t[s];
-    uint64_t* feature_id_temp = new uint64_t[s];
     for (size_t i = 0; i < s; i++) {
         iocnt_temp[i] = 0;
-        feature_id_temp[i] = 0;
     }
     ////printf("S value: %llu\n", (unsigned long long)s);
     uint64_t* evicted_p_array; 
@@ -1394,11 +1391,9 @@ range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint6
     cuda_err_chk(cudaMemcpy(rdt.pages//_states
                             , ts, s * sizeof(data_page_t), cudaMemcpyHostToDevice));
     cuda_err_chk(cudaMemcpy(rdt.iocnt, iocnt_temp, s * sizeof(uint64_t), cudaMemcpyHostToDevice));
-    cuda_err_chk(cudaMemcpy(rdt.feature_id, feature_id_temp, s * sizeof(uint64_t), cudaMemcpyHostToDevice));
     printf("range_t::copy size: %lu\n", s * sizeof(data_page_t));
     delete ts;
     delete iocnt_temp;
-    delete feature_id_temp;
 
 
     //page_addresses_buff = createBuffer(s * sizeof(uint32_t), cudaDevice);
@@ -1616,7 +1611,7 @@ void range_d_t<T>::set_window_buffer_counter(const size_t pg, const size_t count
 template <typename T>
 __forceinline__
 __device__
-uint64_t range_d_t<T>::acquire_page(const size_t pg, const uint32_t count, const bool write, const uint32_t ctrl_, const uint32_t queue) {
+uint64_t range_d_t<T>::acquire_page(const size_t pg, const uint32_t count, const bool write, const uint32_t ctrl_, const uint32_t queue,uint64_t feature_id) {
     uint64_t index = pg;
     access_cnt.fetch_add(count, simt::memory_order_relaxed);
     acquire_cnt.fetch_add(1, simt::memory_order_relaxed);
@@ -1680,6 +1675,7 @@ uint64_t range_d_t<T>::acquire_page(const size_t pg, const uint32_t count, const
                 
 		        read_data(&cache, (c->d_qps)+queue, ((b_page)*cache.n_blocks_per_page), cache.n_blocks_per_page, page_trans);
                 //page_addresses[index].store(page_trans, simt::memory_order_release);
+                iocnt[feature_id]++;
 		        pages[index].offset = page_trans;
                 // while (cache.page_translation[global_page].load(simt::memory_order_acquire) != page_trans)
                 //     __nanosleep(100);
@@ -2030,7 +2026,7 @@ struct array_d_t {
     __forceinline__
     __device__
     void coalesce_page(const uint32_t lane, const uint32_t mask, const int64_t r, const uint64_t page, const uint64_t gaddr,
-                        const bool write,uint32_t& eq_mask, int& master, uint32_t& count, uint64_t& base_master) const {
+                        const bool write,uint32_t& eq_mask, int& master, uint32_t& count, uint64_t& base_master,uint64_t feature_id = 0) const {
         // printf("array_d_t::coalesce_page\n");
         // coalesce_page_cnt.fetch_add(1, simt::memory_order_relaxed);
         uint32_t ctrl;
@@ -2071,7 +2067,7 @@ struct array_d_t {
         if (master == lane) {
             // 
             //std::pair<uint64_t, bool> base_memcpyflag;
-            base = r_->acquire_page(page, count, dirty, ctrl, queue);
+            base = r_->acquire_page(page, count, dirty, ctrl, queue,feature_id);
             base_master = base;
 //                //printf("++tid: %llu\tbase: %p  page:%llu\n", (unsigned long long) threadIdx.x, base_master, (unsigned long long) page);
         }
@@ -2276,7 +2272,8 @@ struct array_d_t {
             uint64_t subindex = r_->get_subindex(i);
             uint64_t gaddr = r_->get_global_address(page);
             // printf("array_d_t::acquire_page\n");
-            coalesce_page(lane, mask, r, page, gaddr, false, eq_mask, master, count, base_master);
+            uint64_t feature_id = i/r_->page_size;
+            coalesce_page(lane, mask, r, page, gaddr, false, eq_mask, master, count, base_master,feature_id);
             page_ = &r_->pages[base_master];
 
 
@@ -2814,6 +2811,15 @@ struct array_t {
     BufferPtr d_ranges_buff;
     BufferPtr d_d_ranges_buff;
 
+    void print_iocnt(void) {
+        std::vector<range_d_t<T>> rdt(adt.n_ranges);
+        cuda_err_chk(cudaMemcpy(rdt.data(), adt.d_ranges, adt.n_ranges*sizeof(range_d_t<T>), cudaMemcpyDeviceToHost));
+        for (size_t i = 0; i < adt.n_ranges; i++) {
+            for (size_t j = 0; j < rdt[i].num_nodes; j++) {
+                std::cout << "iocnt: " << j << ": " << rdt[i].iocnt[j] << std::endl;
+            }
+        }
+    }
     void print_reset_stats(void) {
         std::vector<range_d_t<T>> rdt(adt.n_ranges);
         // printf("array_t::coalesce_page: %d\n",adt.coalesce_page_cnt);
