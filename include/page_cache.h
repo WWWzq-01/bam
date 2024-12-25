@@ -1676,6 +1676,7 @@ uint64_t range_d_t<T>::acquire_page(const size_t pg, const uint32_t count, const
 		        read_data(&cache, (c->d_qps)+queue, ((b_page)*cache.n_blocks_per_page), cache.n_blocks_per_page, page_trans);
                 //page_addresses[index].store(page_trans, simt::memory_order_release);
                 iocnt[feature_id]++;
+                // printf("page_cache.h: iocnt: %d: %d\n", feature_id, iocnt[feature_id]);
 		        pages[index].offset = page_trans;
                 // while (cache.page_translation[global_page].load(simt::memory_order_acquire) != page_trans)
                 //     __nanosleep(100);
@@ -1794,7 +1795,6 @@ bool range_d_t<T>::wb_check_page(const size_t pg, uint64_t & page_trans){
 	       	printf("off 1\n");
 */
 }
-
 
 template <typename T>
 __forceinline__
@@ -2812,13 +2812,42 @@ struct array_t {
     BufferPtr d_d_ranges_buff;
 
     void print_iocnt(void) {
+        printf("page_cache.h: print_iocnt\n");
+        printf("page_cache.h: checking n_ranges: %d\n", adt.n_ranges);
         std::vector<range_d_t<T>> rdt(adt.n_ranges);
         cuda_err_chk(cudaMemcpy(rdt.data(), adt.d_ranges, adt.n_ranges*sizeof(range_d_t<T>), cudaMemcpyDeviceToHost));
+        printf("page_cache.h: cudaMemcpy done\n");
+        // printf("page_cache.h: adt.n_ranges: %d\n", adt.n_ranges);
+        printf("num_nodes: %d\n", rdt[0].num_nodes);
+        // 打开文件（只打开一次）
+        const std::string log_dir = "/home/wzq/GIDS/evaluation/logs";
+        const std::string csv_path = log_dir + "/iocnt_stats.csv";
+        std::ofstream csv_file(csv_path, std::ios::app);
+        if (!csv_file.is_open()) {
+            printf("Error: Unable to open %s\n", csv_path.c_str());
+            return;
+        }
+        // 只写入一次文件头
+        csv_file << "node_id,iocnt\n";
+        // 为每个range的iocnt分配内存并拷贝数据
+        // 处理每个 range
         for (size_t i = 0; i < adt.n_ranges; i++) {
+            if (rdt[i].num_nodes <= 0 || rdt[i].iocnt == nullptr) {
+                printf("Warning: Invalid range data at index %zu\n", i);
+                continue;
+            }
+            std::vector<uint64_t> iocnt_host(rdt[i].num_nodes);
+            cuda_err_chk(cudaMemcpy(iocnt_host.data(), rdt[i].iocnt, 
+                                  rdt[i].num_nodes * sizeof(uint64_t), 
+                                  cudaMemcpyDeviceToHost));
+
+            // 写入该 range 的所有数据
             for (size_t j = 0; j < rdt[i].num_nodes; j++) {
-                std::cout << "iocnt: " << j << ": " << rdt[i].iocnt[j] << std::endl;
+                csv_file << j << "," << iocnt_host[j] << "\n";
             }
         }
+        csv_file.close();
+        printf("page_cache.h: print_iocnt done\n");
     }
     void print_reset_stats(void) {
         std::vector<range_d_t<T>> rdt(adt.n_ranges);
@@ -3582,3 +3611,4 @@ inline __device__ void access_data(page_cache_d_t* pc, QueuePair* qp, const uint
 
 
 #endif // __PAGE_CACHE_H__
+
