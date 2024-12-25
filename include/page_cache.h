@@ -2819,16 +2819,16 @@ struct array_t {
         printf("page_cache.h: cudaMemcpy done\n");
         // printf("page_cache.h: adt.n_ranges: %d\n", adt.n_ranges);
         printf("num_nodes: %d\n", rdt[0].num_nodes);
-        // 打开文件（只打开一次）
+        // 打开文件（覆盖写入）
         const std::string log_dir = "/home/wzq/GIDS/evaluation/logs";
         const std::string csv_path = log_dir + "/iocnt_stats.csv";
-        std::ofstream csv_file(csv_path, std::ios::app);
+        std::ofstream csv_file(csv_path, std::ios::out | std::ios::trunc);
         if (!csv_file.is_open()) {
             printf("Error: Unable to open %s\n", csv_path.c_str());
             return;
         }
-        // 只写入一次文件头
-        csv_file << "node_id,iocnt\n";
+        // 写入文件头
+        csv_file << "feature_id,iocnt\n";
         // 为每个range的iocnt分配内存并拷贝数据
         // 处理每个 range
         for (size_t i = 0; i < adt.n_ranges; i++) {
