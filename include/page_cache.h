@@ -1363,7 +1363,7 @@ range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint6
     cache = (page_cache_d_t*) c_h->d_pc_ptr;
     pages_buff = createBuffer(s * sizeof(data_page_t), cudaDevice);
     printf("range_t::alloc size: %lu\n", s * sizeof(data_page_t));
-    iocnt_buff = createBuffer(s * sizeof(uint64_t), cudaDevice);
+    iocnt_buff = createBuffer(num_nodes * sizeof(uint64_t), cudaDevice);
     printf("range_t::alloc size: %lu\n", num_nodes * sizeof(uint64_t));
     int bs = 1024*5*5*10;
 
@@ -1378,8 +1378,8 @@ range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint6
         ts[i].prefetch_count=0;
         ts[i].prefetch_counter=0;
     }
-    uint64_t* iocnt_temp = new uint64_t[s];
-    for (size_t i = 0; i < s; i++) {
+    uint64_t* iocnt_temp = new uint64_t[num_nodes];
+    for (size_t i = 0; i < num_nodes; i++) {
         iocnt_temp[i] = 0;
     }
     ////printf("S value: %llu\n", (unsigned long long)s);
@@ -1390,7 +1390,7 @@ range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint6
     rdt.evicted_p_array=evicted_p_array;
     cuda_err_chk(cudaMemcpy(rdt.pages//_states
                             , ts, s * sizeof(data_page_t), cudaMemcpyHostToDevice));
-    cuda_err_chk(cudaMemcpy(rdt.iocnt, iocnt_temp, s * sizeof(uint64_t), cudaMemcpyHostToDevice));
+    cuda_err_chk(cudaMemcpy(rdt.iocnt, iocnt_temp, num_nodes * sizeof(uint64_t), cudaMemcpyHostToDevice));
     printf("range_t::copy size: %lu\n", s * sizeof(data_page_t));
     delete ts;
     delete iocnt_temp;
@@ -2272,7 +2272,7 @@ struct array_d_t {
             uint64_t subindex = r_->get_subindex(i);
             uint64_t gaddr = r_->get_global_address(page);
             // printf("array_d_t::acquire_page\n");
-            uint64_t feature_id = i/r_->page_size;
+            uint64_t feature_id = i*4/r_->page_size;
             coalesce_page(lane, mask, r, page, gaddr, false, eq_mask, master, count, base_master,feature_id);
             page_ = &r_->pages[base_master];
 
