@@ -92,6 +92,7 @@ typedef struct __align__(32) {
    // uint8_t pad[32-4-4];
 
     uint32_t cpu_feature_offset;
+    uint32_t gpu_feature_offset;
 
 } __attribute__((aligned (32))) data_page_t;
 
@@ -1299,8 +1300,13 @@ struct range_d_t {
     void set_cpu_buffer(const size_t index, uint32_t offset);
     __forceinline__
     __device__
+    void set_gpu_buffer(const size_t index, uint32_t offset);
+    __forceinline__
+    __device__
     uint32_t get_cpu_offset(const size_t index);
-
+    __forceinline__
+    __device__
+    uint32_t get_gpu_offset(const size_t index);
 
     __forceinline__
     __device__
@@ -1374,6 +1380,7 @@ range_t<T>::range_t(uint64_t is, uint64_t count, uint64_t ps, uint64_t pc, uint6
     for (size_t i = 0; i < s; i++) {
         ts[i].state = INVALID;
         ts[i].cpu_feature_offset = 0;
+        ts[i].gpu_feature_offset = 0;
 
         ts[i].prefetch_count=0;
         ts[i].prefetch_counter=0;
@@ -1578,9 +1585,24 @@ void range_d_t<T>::set_cpu_buffer(uint64_t index, uint32_t offset) {
 template <typename T>
 __forceinline__
 __device__
+void range_d_t<T>::set_gpu_buffer(uint64_t index, uint32_t offset) {
+   // pages[index].state.fetch_or(DIRTY, simt::memory_order_relaxed);
+    pages[index].gpu_feature_offset = (offset << 1) | (0x1);
+}
+
+template <typename T>
+__forceinline__
+__device__
 uint32_t range_d_t<T>::get_cpu_offset(const size_t index) {
    // pages[index].state.fetch_or(DIRTY, simt::memory_order_relaxed);
     return pages[index].cpu_feature_offset;
+}
+
+template <typename T>
+__forceinline__
+__device__
+uint32_t range_d_t<T>::get_gpu_offset(const size_t index) {
+    return pages[index].gpu_feature_offset;
 }
 
 
